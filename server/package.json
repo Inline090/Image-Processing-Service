@@ -1,0 +1,11 @@
+{
+  "name": "@image-processing-service/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Express API for the Image Processing Service: JWT auth, S3 uploads, Sharp pipeline, PostgreSQL metadata",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  }
+}

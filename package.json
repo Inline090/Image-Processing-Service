@@ -1,0 +1,14 @@
+{
+  "name": "image-processing-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Image transformation platform with a React client and Node.js/Express API",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=server",
+    "dev:client": "npm run dev --workspace=client"
+  }
+}

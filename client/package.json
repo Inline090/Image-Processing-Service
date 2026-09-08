@@ -1,0 +1,11 @@
+{
+  "name": "@image-processing-service/client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "React frontend for the Image Processing Service: upload, preview edits, browse past uploads",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  }
+}
