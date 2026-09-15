@@ -4,7 +4,7 @@ import { hashPassword } from '../utils/password.js';
 
 export async function register(req: Request, res: Response): Promise<void> {
   const { email, password } = req.body as { email: string; password: string };
-  const passwordHash = hashPassword(password);
+  const passwordHash = await hashPassword(password);
 
   const user = await createUser({ email, passwordHash });
 
