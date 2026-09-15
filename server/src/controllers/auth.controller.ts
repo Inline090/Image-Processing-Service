@@ -1,11 +1,12 @@
 import type { Request, Response } from 'express';
 import { AppError } from '../middleware/error.js';
 import { createUser, findUserByEmail, findUserById } from '../repositories/users.js';
+import type { LoginInput, RegisterInput } from '../schemas/auth.schema.js';
 import { signToken } from '../utils/jwt.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
 
 export async function register(req: Request, res: Response): Promise<void> {
-  const { email, password } = req.body as { email: string; password: string };
+  const { email, password } = req.body as RegisterInput;
   const passwordHash = await hashPassword(password);
 
   const user = await createUser({ email, passwordHash });
@@ -20,7 +21,7 @@ export async function register(req: Request, res: Response): Promise<void> {
 }
 
 export async function login(req: Request, res: Response): Promise<void> {
-  const { email, password } = req.body as { email: string; password: string };
+  const { email, password } = req.body as LoginInput;
 
   const user = await findUserByEmail(email);
   if (user === null) {
