@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto';
 import type { Request, Response } from 'express';
 import type { ImageRow } from '../db/types.js';
 import { AppError } from '../middleware/error.js';
-import { transformImage, type TransformOptions } from '../processing/transform.js';
+import { transformImage } from '../processing/transform.js';
 import { createImage, findImageById, markImageReady } from '../repositories/images.js';
+import type { TransformInput } from '../schemas/transform.schema.js';
 import { getObject, putObject } from '../storage/s3.js';
 
 function publicImage(image: ImageRow) {
@@ -59,7 +60,7 @@ export async function transform(req: Request, res: Response): Promise<void> {
   }
 
   const original = await getObject(image.original_key);
-  const result = await transformImage(original, req.body as TransformOptions);
+  const result = await transformImage(original, req.body as TransformInput);
 
   const processedKey = `processed/${image.user_id}/${randomUUID()}`;
   await putObject(processedKey, result.buffer, `image/${result.format}`);
