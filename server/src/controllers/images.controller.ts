@@ -1,8 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import type { Request, Response } from 'express';
+import type { ImageRow } from '../db/types.js';
 import { AppError } from '../middleware/error.js';
-import { createImage } from '../repositories/images.js';
-import { putObject } from '../storage/s3.js';
+import { transformImage, type TransformOptions } from '../processing/transform.js';
+import { createImage, findImageById, markImageReady } from '../repositories/images.js';
+import { getObject, putObject } from '../storage/s3.js';
+
+function publicImage(image: ImageRow) {
+  return {
+    id: image.id,
+    originalKey: image.original_key,
+    processedKey: image.processed_key,
+    mimeType: image.mime_type,
+    sizeBytes: Number(image.size_bytes),
+    status: image.status,
+    createdAt: image.created_at,
+  };
+}
 
 export async function uploadImage(req: Request, res: Response): Promise<void> {
   const authUser = req.user;
@@ -25,14 +39,39 @@ export async function uploadImage(req: Request, res: Response): Promise<void> {
     sizeBytes: file.size,
   });
 
-  res.status(201).json({
+  res.status(201).json({ image: publicImage(image) });
+}
+
+export async function transform(req: Request, res: Response): Promise<void> {
+  const authUser = req.user;
+  if (authUser === undefined) {
+    throw new AppError('Not authenticated', 401);
+  }
+
+  const imageId = req.params.id;
+  if (typeof imageId !== 'string') {
+    throw new AppError('Image id is required', 400);
+  }
+
+  const image = await findImageById(imageId);
+  if (image === null) {
+    throw new AppError('Image not found', 404);
+  }
+
+  const original = await getObject(image.original_key);
+  const result = await transformImage(original, req.body as TransformOptions);
+
+  const processedKey = `processed/${image.user_id}/${randomUUID()}`;
+  await putObject(processedKey, result.buffer, `image/${result.format}`);
+
+  const updated = await markImageReady(image.id, processedKey);
+
+  res.json({
     image: {
-      id: image.id,
-      originalKey: image.original_key,
-      mimeType: image.mime_type,
-      sizeBytes: Number(image.size_bytes),
-      status: image.status,
-      createdAt: image.created_at,
+      ...publicImage(updated),
+      format: result.format,
+      width: result.width,
+      height: result.height,
     },
   });
 }
