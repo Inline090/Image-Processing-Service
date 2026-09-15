@@ -28,10 +28,38 @@ export async function createImage({
   return image;
 }
 
-export async function findImageById(id: string): Promise<ImageRow | null> {
-  const { rows } = await pool.query<ImageRow>('SELECT * FROM images WHERE id = $1', [id]);
+export async function findImageByIdForUser(id: string, userId: string): Promise<ImageRow | null> {
+  const { rows } = await pool.query<ImageRow>(
+    'SELECT * FROM images WHERE id = $1 AND user_id = $2',
+    [id, userId],
+  );
 
   return rows[0] ?? null;
+}
+
+export async function listImagesForUser(
+  userId: string,
+  limit: number,
+  offset: number,
+): Promise<ImageRow[]> {
+  const { rows } = await pool.query<ImageRow>(
+    `SELECT * FROM images
+     WHERE user_id = $1
+     ORDER BY created_at DESC
+     LIMIT $2 OFFSET $3`,
+    [userId, limit, offset],
+  );
+
+  return rows;
+}
+
+export async function countImagesForUser(userId: string): Promise<number> {
+  const { rows } = await pool.query<{ count: string }>(
+    'SELECT count(*)::text AS count FROM images WHERE user_id = $1',
+    [userId],
+  );
+
+  return Number(rows[0]?.count ?? 0);
 }
 
 export async function markImageReady(id: string, processedKey: string): Promise<ImageRow> {
@@ -48,21 +76,4 @@ export async function markImageReady(id: string, processedKey: string): Promise<
     throw new Error('Update returned no row');
   }
   return image;
-}
-
-export async function listImages(limit: number, offset: number): Promise<ImageRow[]> {
-  const { rows } = await pool.query<ImageRow>(
-    'SELECT * FROM images ORDER BY created_at DESC LIMIT $1 OFFSET $2',
-    [limit, offset],
-  );
-
-  return rows;
-}
-
-export async function countImages(): Promise<number> {
-  const { rows } = await pool.query<{ count: string }>(
-    'SELECT count(*)::text AS count FROM images',
-  );
-
-  return Number(rows[0]?.count ?? 0);
 }

@@ -6,10 +6,10 @@ import { formatIssues } from '../middleware/validate.js';
 import { getCachedTransform, setCachedTransform } from '../processing/cache.js';
 import { ImageTooLargeError, transformImage, type TransformResult } from '../processing/transform.js';
 import {
-  countImages,
+  countImagesForUser,
   createImage,
-  findImageById,
-  listImages,
+  findImageByIdForUser,
+  listImagesForUser,
   markImageReady,
 } from '../repositories/images.js';
 import { listImagesQuerySchema } from '../schemas/image.schema.js';
@@ -63,7 +63,7 @@ export async function transform(req: Request, res: Response): Promise<void> {
     throw new AppError('Image id is required', 400);
   }
 
-  const image = await findImageById(imageId);
+  const image = await findImageByIdForUser(imageId, authUser.sub);
   if (image === null) {
     throw new AppError('Image not found', 404);
   }
@@ -120,6 +120,11 @@ export async function transform(req: Request, res: Response): Promise<void> {
 }
 
 export async function list(req: Request, res: Response): Promise<void> {
+  const authUser = req.user;
+  if (authUser === undefined) {
+    throw new AppError('Not authenticated', 401);
+  }
+
   const parsed = listImagesQuerySchema.safeParse(req.query);
 
   if (!parsed.success) {
@@ -129,7 +134,10 @@ export async function list(req: Request, res: Response): Promise<void> {
   const { page, limit } = parsed.data;
   const offset = (page - 1) * limit;
 
-  const [total, rows] = await Promise.all([countImages(), listImages(limit, offset)]);
+  const [total, rows] = await Promise.all([
+    countImagesForUser(authUser.sub),
+    listImagesForUser(authUser.sub, limit, offset),
+  ]);
 
   res.json({
     images: await Promise.all(rows.map((row) => serializeImage(row))),
@@ -141,12 +149,17 @@ export async function list(req: Request, res: Response): Promise<void> {
 }
 
 export async function getImage(req: Request, res: Response): Promise<void> {
+  const authUser = req.user;
+  if (authUser === undefined) {
+    throw new AppError('Not authenticated', 401);
+  }
+
   const imageId = req.params.id;
   if (typeof imageId !== 'string') {
     throw new AppError('Image id is required', 400);
   }
 
-  const image = await findImageById(imageId);
+  const image = await findImageByIdForUser(imageId, authUser.sub);
   if (image === null) {
     throw new AppError('Image not found', 404);
   }
