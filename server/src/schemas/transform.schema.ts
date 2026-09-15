@@ -14,16 +14,16 @@ const watermarkPositions = [
 
 export const transformSchema = z
   .object({
-    width: z.number().int().positive().optional(),
-    height: z.number().int().positive().optional(),
+    width: z.number().int().positive().max(4096).optional(),
+    height: z.number().int().positive().max(4096).optional(),
     fit: z.enum(['cover', 'contain', 'fill', 'inside', 'outside']).optional(),
     rotate: z.number().int().optional(),
     crop: z
       .object({
         left: z.number().int().min(0),
         top: z.number().int().min(0),
-        width: z.number().int().positive(),
-        height: z.number().int().positive(),
+        width: z.number().int().positive().max(4096),
+        height: z.number().int().positive().max(4096),
       })
       .strict()
       .optional(),

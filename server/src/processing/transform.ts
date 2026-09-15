@@ -1,4 +1,5 @@
 import sharp from 'sharp';
+import { config } from '../config.js';
 
 export type ResizeFit = 'cover' | 'contain' | 'fill' | 'inside' | 'outside';
 
@@ -31,6 +32,13 @@ export type TransformResult = {
   width: number;
   height: number;
 };
+
+export class ImageTooLargeError extends Error {
+  constructor(pixels: number, limit: number) {
+    super(`Input image is ${pixels} pixels, the limit is ${limit}`);
+    this.name = 'ImageTooLargeError';
+  }
+}
 
 const SVG_ESCAPES: Record<string, string> = {
   '<': '&lt;',
@@ -76,7 +84,14 @@ export async function transformImage(
   input: Buffer,
   options: TransformOptions,
 ): Promise<TransformResult> {
-  let pipeline = sharp(input).autoOrient();
+  const metadata = await sharp(input).metadata();
+  const inputPixels = (metadata.width ?? 0) * (metadata.height ?? 0);
+
+  if (inputPixels > config.maxInputPixels) {
+    throw new ImageTooLargeError(inputPixels, config.maxInputPixels);
+  }
+
+  let pipeline = sharp(input, { limitInputPixels: config.maxInputPixels }).autoOrient();
 
   if (options.rotate !== undefined) {
     pipeline = pipeline.rotate(options.rotate);
@@ -110,7 +125,7 @@ export async function transformImage(
       sized.info.height,
     );
 
-    pipeline = sharp(sized.data).composite([
+    pipeline = sharp(sized.data, { limitInputPixels: config.maxInputPixels }).composite([
       {
         input: overlay,
         gravity: options.watermark.position ?? 'southeast',

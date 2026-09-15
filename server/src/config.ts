@@ -22,6 +22,15 @@ function readPort(name: string, fallback: number): number {
   return port;
 }
 
+function readInt(name: string, fallback: number, min: number): number {
+  const raw = optional(name, String(fallback));
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < min) {
+    throw new Error(`Invalid ${name}: "${raw}" (expected an integer of at least ${min})`);
+  }
+  return value;
+}
+
 export const config = {
   env: optional('NODE_ENV', 'development'),
   logLevel: optional('LOG_LEVEL', 'info'),
@@ -33,4 +42,5 @@ export const config = {
   s3Bucket: optional('S3_BUCKET', 'image-processing-originals'),
   s3Endpoint: optional('S3_ENDPOINT', ''),
   sqsQueueUrl: optional('SQS_QUEUE_URL', 'http://localhost:9324/000000000000/transformations'),
+  maxInputPixels: readInt('MAX_INPUT_PIXELS', 50_000_000, 1),
 } as const;
