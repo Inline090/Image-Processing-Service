@@ -44,12 +44,29 @@ function escapeXml(value: string): string {
   return value.replace(/[<>&'"]/g, (char) => SVG_ESCAPES[char] ?? char);
 }
 
-function watermarkOverlay(text: string): Buffer {
-  const label = escapeXml(text);
+function watermarkOverlay(text: string, imageWidth: number, imageHeight: number): Buffer {
+  const fontByWidth = Math.round(imageWidth * 0.05);
+  const fontByHeight = Math.round(imageHeight * 0.25);
+  const fontSize = Math.max(8, Math.min(fontByWidth, fontByHeight, 48));
+
+  const width = imageWidth;
+  const height = Math.max(1, Math.min(Math.round(fontSize * 1.8), imageHeight));
+  const baseline = Math.min(Math.round(fontSize * 1.25), height);
+
   const svg =
-    '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="64">' +
-    '<text x="12" y="42" font-family="sans-serif" font-size="28" fill="#ffffff" fill-opacity="0.85">' +
-    label +
+    '<svg xmlns="http://www.w3.org/2000/svg" width="' +
+    width +
+    '" height="' +
+    height +
+    '">' +
+    '<text x="' +
+    Math.round(fontSize * 0.4) +
+    '" y="' +
+    baseline +
+    '" font-family="sans-serif" font-size="' +
+    fontSize +
+    '" fill="#ffffff" fill-opacity="0.85">' +
+    escapeXml(text) +
     '</text></svg>';
 
   return Buffer.from(svg);
@@ -86,9 +103,16 @@ export async function transformImage(
   }
 
   if (options.watermark !== undefined) {
-    pipeline = pipeline.composite([
+    const sized = await pipeline.toBuffer({ resolveWithObject: true });
+    const overlay = watermarkOverlay(
+      options.watermark.text,
+      sized.info.width,
+      sized.info.height,
+    );
+
+    pipeline = sharp(sized.data).composite([
       {
-        input: watermarkOverlay(options.watermark.text),
+        input: overlay,
         gravity: options.watermark.position ?? 'southeast',
       },
     ]);
