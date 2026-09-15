@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Request, Response } from 'express';
 import type { ImageRow } from '../db/types.js';
 import { AppError } from '../middleware/error.js';
+import { getCachedTransform, setCachedTransform } from '../processing/cache.js';
 import { ImageTooLargeError, transformImage, type TransformResult } from '../processing/transform.js';
 import { createImage, findImageById, markImageReady } from '../repositories/images.js';
 import type { TransformInput } from '../schemas/transform.schema.js';
@@ -59,11 +60,27 @@ export async function transform(req: Request, res: Response): Promise<void> {
     throw new AppError('Image not found', 404);
   }
 
+  const options = req.body as TransformInput;
+  const cached = getCachedTransform(image.id, options);
+
+  if (cached !== null) {
+    res.json({
+      image: {
+        ...publicImage(image),
+        format: cached.format,
+        width: cached.width,
+        height: cached.height,
+        cached: true,
+      },
+    });
+    return;
+  }
+
   const original = await getObject(image.original_key);
 
   let result: TransformResult;
   try {
-    result = await transformImage(original, req.body as TransformInput);
+    result = await transformImage(original, options);
   } catch (err) {
     if (err instanceof ImageTooLargeError) {
       throw new AppError(err.message, 413);
@@ -76,12 +93,20 @@ export async function transform(req: Request, res: Response): Promise<void> {
 
   const updated = await markImageReady(image.id, processedKey);
 
+  setCachedTransform(image.id, options, {
+    processedKey,
+    format: result.format,
+    width: result.width,
+    height: result.height,
+  });
+
   res.json({
     image: {
       ...publicImage(updated),
       format: result.format,
       width: result.width,
       height: result.height,
+      cached: false,
     },
   });
 }
