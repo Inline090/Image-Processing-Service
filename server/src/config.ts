@@ -22,7 +22,6 @@ function readPort(name: string, fallback: number): number {
   return port;
 }
 
-// Parsed once, at boot: anything downstream can trust these values.
 export const config = {
   env: optional('NODE_ENV', 'development'),
   logLevel: optional('LOG_LEVEL', 'info'),

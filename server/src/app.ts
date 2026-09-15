@@ -11,7 +11,6 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-// Must stay last, in this order: everything above them is what they catch.
 app.use(notFound);
 app.use(errorHandler);
 

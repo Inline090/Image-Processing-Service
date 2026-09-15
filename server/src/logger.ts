@@ -3,7 +3,6 @@ import { config } from './config.js';
 
 export const logger = pino({
   level: config.logLevel,
-  // Human-readable while developing; plain JSON in production so a log shipper can parse it.
   transport:
     config.env === 'production' ? undefined : { target: 'pino-pretty', options: { colorize: true } },
 });

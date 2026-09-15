@@ -15,7 +15,6 @@ export function notFound(req: Request, _res: Response, next: NextFunction): void
   next(new AppError(`Route not found: ${req.method} ${req.originalUrl}`, 404));
 }
 
-// Express only recognises an error handler by its four-argument signature, so `_next` stays.
 export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction): void {
   const statusCode = resolveStatus(err);
   const isServerError = statusCode >= 500;
@@ -28,7 +27,6 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
 
   res.status(statusCode).json({
     error: {
-      // 5xx messages and stack traces are for the logs, never for the client.
       message: isServerError ? 'Internal server error' : resolveMessage(err),
     },
   });
@@ -41,7 +39,6 @@ function resolveStatus(err: unknown): number {
     return err.statusCode;
   }
 
-  // body-parser tags its own failures (e.g. malformed JSON) with a 4xx status.
   if (typeof err === 'object' && err !== null) {
     const { status, statusCode } = err as StatusCarrier;
     const candidate = statusCode ?? status;
