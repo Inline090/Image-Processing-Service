@@ -1,8 +1,7 @@
 import app from './app.js';
+import { config } from './config.js';
 import { logger } from './logger.js';
 
-const PORT = Number(process.env.PORT ?? 3000);
-
-app.listen(PORT, () => {
-  logger.info({ port: PORT }, 'API listening');
+app.listen(config.port, () => {
+  logger.info({ port: config.port, env: config.env }, 'API listening');
 });
