@@ -1,20 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import type { Request, Response } from 'express';
-import type { ImageRow } from '../db/types.js';
+import type { ImageRow, JobRow } from '../db/types.js';
 import { AppError } from '../middleware/error.js';
 import { formatIssues } from '../middleware/validate.js';
-import { getCachedTransform, setCachedTransform } from '../processing/cache.js';
-import { ImageTooLargeError, transformImage, type TransformResult } from '../processing/transform.js';
+import { hashTransformOptions } from '../processing/optionsHash.js';
+import { publishTransformJob } from '../queue/sqs.js';
 import {
   countImagesForUser,
   createImage,
   findImageByIdForUser,
   listImagesForUser,
-  markImageReady,
 } from '../repositories/images.js';
+import { createJob, findReadyJob } from '../repositories/jobs.js';
 import { listImagesQuerySchema } from '../schemas/image.schema.js';
 import type { TransformInput } from '../schemas/transform.schema.js';
-import { getObject, putObject, signedUrl } from '../storage/s3.js';
+import { putObject, signedUrl } from '../storage/s3.js';
 
 async function serializeImage(image: ImageRow) {
   return {
@@ -52,6 +52,22 @@ export async function uploadImage(req: Request, res: Response): Promise<void> {
   res.status(201).json({ image: await serializeImage(image) });
 }
 
+function serializeJob(job: JobRow) {
+  return {
+    id: job.id,
+    imageId: job.image_id,
+    status: job.status,
+    attempts: job.attempts,
+    error: job.error,
+    processedKey: job.processed_key,
+    format: job.format,
+    width: job.width,
+    height: job.height,
+    createdAt: job.created_at,
+    updatedAt: job.updated_at,
+  };
+}
+
 export async function transform(req: Request, res: Response): Promise<void> {
   const authUser = req.user;
   if (authUser === undefined) {
@@ -69,55 +85,30 @@ export async function transform(req: Request, res: Response): Promise<void> {
   }
 
   const options = req.body as TransformInput;
-  const cached = getCachedTransform(image.id, options);
+  const optionsHash = hashTransformOptions(image.id, options);
+  const existing = await findReadyJob(image.id, optionsHash);
 
-  if (cached !== null) {
+  if (existing !== null) {
     res.json({
-      image: {
-        ...(await serializeImage(image)),
-        format: cached.format,
-        width: cached.width,
-        height: cached.height,
-        cached: true,
+      job: {
+        ...serializeJob(existing),
+        processedUrl:
+          existing.processed_key === null ? null : await signedUrl(existing.processed_key),
       },
+      cached: true,
     });
     return;
   }
 
-  const original = await getObject(image.original_key);
+  const job = await createJob({ imageId: image.id, userId: authUser.sub, options, optionsHash });
+  await publishTransformJob({ jobId: job.id, imageId: image.id, userId: authUser.sub, options });
 
-  let result: TransformResult;
-  try {
-    result = await transformImage(original, options);
-  } catch (err) {
-    if (err instanceof ImageTooLargeError) {
-      throw new AppError(err.message, 413);
-    }
-    throw err;
-  }
-
-  const processedKey = `processed/${image.user_id}/${randomUUID()}`;
-  await putObject(processedKey, result.buffer, `image/${result.format}`);
-
-  const updated = await markImageReady(image.id, processedKey);
-
-  setCachedTransform(image.id, options, {
-    processedKey,
-    format: result.format,
-    width: result.width,
-    height: result.height,
-  });
-
-  res.json({
-    image: {
-      ...(await serializeImage(updated)),
-      format: result.format,
-      width: result.width,
-      height: result.height,
-      cached: false,
-    },
+  res.status(202).json({
+    job: { ...serializeJob(job), processedUrl: null },
+    cached: false,
   });
 }
+
 
 export async function list(req: Request, res: Response): Promise<void> {
   const authUser = req.user;

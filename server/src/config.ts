@@ -41,6 +41,7 @@ export const config = {
   awsRegion: optional('AWS_REGION', 'us-east-1'),
   s3Bucket: optional('S3_BUCKET', 'image-processing-originals'),
   s3Endpoint: optional('S3_ENDPOINT', ''),
+  sqsEndpoint: optional('SQS_ENDPOINT', ''),
   sqsQueueUrl: optional('SQS_QUEUE_URL', 'http://localhost:9324/000000000000/transformations'),
   maxInputPixels: readInt('MAX_INPUT_PIXELS', 50_000_000, 1),
 } as const;
