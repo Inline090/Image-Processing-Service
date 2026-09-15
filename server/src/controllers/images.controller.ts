@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Request, Response } from 'express';
 import { AppError } from '../middleware/error.js';
 import { createImage } from '../repositories/images.js';
@@ -14,8 +15,8 @@ export async function uploadImage(req: Request, res: Response): Promise<void> {
     throw new AppError('No file uploaded - expected a form field named "image"', 400);
   }
 
-  const key = file.originalname;
-  await putObject(key, file.buffer);
+  const key = `originals/${authUser.sub}/${randomUUID()}`;
+  await putObject(key, file.buffer, file.mimetype);
 
   const image = await createImage({
     userId: authUser.sub,

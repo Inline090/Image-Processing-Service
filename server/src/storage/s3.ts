@@ -6,12 +6,13 @@ export const s3 = new S3Client({
   ...(config.s3Endpoint === '' ? {} : { endpoint: config.s3Endpoint, forcePathStyle: true }),
 });
 
-export async function putObject(key: string, body: Buffer): Promise<void> {
+export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
   await s3.send(
     new PutObjectCommand({
       Bucket: config.s3Bucket,
       Key: key,
       Body: body,
+      ContentType: contentType,
     }),
   );
 }

@@ -48,5 +48,7 @@ export async function validateImageFile(
     return;
   }
 
+  file.mimetype = detected.mime;
+
   next();
 }
