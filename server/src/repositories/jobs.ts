@@ -48,3 +48,57 @@ export async function findJobByIdForUser(id: string, userId: string): Promise<Jo
 
   return rows[0] ?? null;
 }
+
+export type JobResult = {
+  processedKey: string;
+  format: string;
+  width: number;
+  height: number;
+};
+
+export async function markJobProcessing(id: string): Promise<void> {
+  await pool.query(
+    `UPDATE jobs
+     SET status = 'processing', attempts = attempts + 1, updated_at = now()
+     WHERE id = $1`,
+    [id],
+  );
+}
+
+export async function markJobReady(id: string, result: JobResult): Promise<void> {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE jobs
+       SET status = 'ready',
+           processed_key = $2,
+           format = $3,
+           width = $4,
+           height = $5,
+           updated_at = now()
+       WHERE id = $1`,
+      [id, result.processedKey, result.format, result.width, result.height],
+    );
+    await client.query(
+      `UPDATE images
+       SET processed_key = $2, status = 'ready'
+       WHERE id = (SELECT image_id FROM jobs WHERE id = $1)`,
+      [id, result.processedKey],
+    );
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function markJobFailed(id: string, error: string): Promise<void> {
+  await pool.query(
+    `UPDATE jobs SET status = 'failed', error = $2, updated_at = now() WHERE id = $1`,
+    [id, error],
+  );
+}

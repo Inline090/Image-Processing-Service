@@ -11,6 +11,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "migrate": "tsx src/db/migrate-cli.ts",
+    "worker": "tsx watch src/worker.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
