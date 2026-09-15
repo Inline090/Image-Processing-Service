@@ -1,7 +1,8 @@
-import app from './app.js'; // ESM: specifiers match the emitted files, not the sources
+import app from './app.js';
+import { logger } from './logger.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
 
 app.listen(PORT, () => {
-  console.log(`API listening on http://localhost:${PORT}`);
+  logger.info({ port: PORT }, 'API listening');
 });

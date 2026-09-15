@@ -8,6 +8,13 @@ export default tseslint.config(
   {
     files: ['**/*.ts'],
     extends: [...tseslint.configs.recommended],
+    rules: {
+      // `_`-prefixed args are intentional: Express needs some params even when unused.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+    },
   },
   prettier,
 );
