@@ -1,17 +1,17 @@
 import type { NextFunction, Request, Response } from 'express';
-import type { ZodType } from 'zod';
+import type { ZodError, ZodType } from 'zod';
 import { AppError } from './error.js';
+
+export function formatIssues(error: ZodError): string {
+  return error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ');
+}
 
 export function validateBody(schema: ZodType) {
   return (req: Request, _res: Response, next: NextFunction): void => {
     const result = schema.safeParse(req.body);
 
     if (!result.success) {
-      const details = result.error.issues
-        .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
-        .join('; ');
-
-      next(new AppError(`Invalid request body - ${details}`, 400));
+      next(new AppError(`Invalid request body - ${formatIssues(result.error)}`, 400));
       return;
     }
 

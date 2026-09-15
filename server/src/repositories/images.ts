@@ -49,3 +49,20 @@ export async function markImageReady(id: string, processedKey: string): Promise<
   }
   return image;
 }
+
+export async function listImages(limit: number, offset: number): Promise<ImageRow[]> {
+  const { rows } = await pool.query<ImageRow>(
+    'SELECT * FROM images ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+    [limit, offset],
+  );
+
+  return rows;
+}
+
+export async function countImages(): Promise<number> {
+  const { rows } = await pool.query<{ count: string }>(
+    'SELECT count(*)::text AS count FROM images',
+  );
+
+  return Number(rows[0]?.count ?? 0);
+}

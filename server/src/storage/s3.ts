@@ -1,4 +1,5 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config.js';
 
 export const s3 = new S3Client({
@@ -25,4 +26,10 @@ export async function getObject(key: string): Promise<Buffer> {
   }
 
   return Buffer.from(await result.Body.transformToByteArray());
+}
+
+export function signedUrl(key: string, expiresInSeconds = 900): Promise<string> {
+  return getSignedUrl(s3, new GetObjectCommand({ Bucket: config.s3Bucket, Key: key }), {
+    expiresIn: expiresInSeconds,
+  });
 }
