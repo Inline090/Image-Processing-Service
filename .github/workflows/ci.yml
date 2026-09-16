@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    env:
+      NODE_ENV: test
+      JWT_SECRET: ci-only-secret
+      JWT_EXPIRES_IN: 1h
+      DATABASE_URL: postgres://ips:ips@localhost:5432/image_processing
+      AWS_REGION: us-east-1
+      S3_BUCKET: image-processing-originals
+      SQS_QUEUE_URL: http://localhost:9324/000000000000/transformations
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ips
+          POSTGRES_PASSWORD: ips
+          POSTGRES_DB: image_processing
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ips"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint (server)
+        run: npm run lint --workspace=server
+
+      - name: Lint (client)
+        run: npm run lint --workspace=client
+
+      - name: Typecheck (server)
+        run: npm run typecheck --workspace=server
+
+      - name: Build (client)
+        run: npm run build --workspace=client
+
+      - name: Migrate database
+        run: npm run migrate --workspace=server
+
+      - name: Unit tests
+        run: npm test --workspace=server
+
+      - name: Integration tests
+        run: npm run test:integration --workspace=server
