@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ips
+      POSTGRES_PASSWORD: ips
+      POSTGRES_DB: image_processing
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ips']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: quay.io/minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: quay.io/minio/mc
+    depends_on:
+      - minio
+    entrypoint:
+      [
+        '/bin/sh',
+        '-c',
+        'until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done && mc mb --ignore-existing local/image-processing-originals',
+      ]
+    restart: 'no'
+
+  elasticmq:
+    image: softwaremill/elasticmq-native
+    ports:
+      - '9324:9324'
+      - '9325:9325'
+
+volumes:
+  postgres-data:
+  minio-data:

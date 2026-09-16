@@ -28,29 +28,26 @@ inside the request path makes the API slow for everyone.
 You need Node 20+ and Docker.
 
 ```bash
-# 1. infrastructure (three emulators standing in for managed AWS services)
-docker run --name ips-postgres -e POSTGRES_USER=ips -e POSTGRES_PASSWORD=ips \
-  -e POSTGRES_DB=image_processing -p 5432:5432 -d postgres:16-alpine
+# 1. infrastructure: PostgreSQL, MinIO (S3 API) and ElasticMQ (SQS API)
+docker compose up -d
 
-docker run --name ips-minio -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-  -p 9000:9000 -p 9001:9001 -d quay.io/minio/minio server /data --console-address ":9001"
-
-docker run --name ips-sqs -p 9324:9324 -p 9325:9325 -d softwaremill/elasticmq-native:latest
-
-# 2. the storage bucket
-docker run --rm --entrypoint sh quay.io/minio/mc -c \
-  "mc alias set local http://host.docker.internal:9000 minioadmin minioadmin && mc mb -p local/image-processing-originals"
-
-# 3. the project
+# 2. the project
 npm install
 cp server/.env.example server/.env
 npm run migrate --workspace=server
 
-# 4. run it (three terminals)
+# 3. run it (three terminals)
 npm run dev                        # API        -> http://localhost:3000
 npm run worker --workspace=server  # queue worker
 npm run dev:client                 # frontend   -> http://localhost:5173
 ```
+
+`docker compose up -d` starts all three services and creates the S3 bucket. PostgreSQL and
+MinIO keep their data in named volumes; ElasticMQ is in-memory, so its queue is recreated on
+boot and the worker creates it on first use.
+
+If you started these containers by hand with `docker run` earlier, stop them first - the
+compose services bind the same ports.
 
 Open `http://localhost:5173`, register an account, and upload something.
 
