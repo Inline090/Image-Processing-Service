@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getJob, type Job } from '../api';
-
-const POLL_INTERVAL_MS = 1000;
+import { startPolling } from '../poll';
 
 const PROGRESS: Record<Job['status'], number> = {
   pending: 5,
@@ -9,6 +8,10 @@ const PROGRESS: Record<Job['status'], number> = {
   ready: 100,
   failed: 100,
 };
+
+function isSettled(job: Job): boolean {
+  return job.status === 'ready' || job.status === 'failed';
+}
 
 type Props = {
   jobId: string;
@@ -19,17 +22,17 @@ export function JobStatus({ jobId }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      getJob(jobId)
-        .then((next) => {
-          setJob(next);
-        })
-        .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : 'Could not load the job');
-        });
-    }, POLL_INTERVAL_MS);
-
-    return () => clearInterval(timer);
+    return startPolling<Job>({
+      fetch: () => getJob(jobId),
+      isSettled,
+      onUpdate: (next) => {
+        setJob(next);
+        setError(null);
+      },
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : 'Could not load the job');
+      },
+    });
   }, [jobId]);
 
   if (error !== null) {
