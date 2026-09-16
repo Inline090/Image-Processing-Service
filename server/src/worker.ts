@@ -1,15 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { DeleteMessageCommand, ReceiveMessageCommand } from '@aws-sdk/client-sqs';
 import { config } from './config.js';
 import { pool } from './db/pool.js';
 import { logger } from './logger.js';
 import { transformImage } from './processing/transform.js';
-import { ensureQueue, sqs, type TransformJobMessage } from './queue/sqs.js';
+import { deleteJob, ensureQueue, receiveJob, type TransformJobMessage } from './queue/sqs.js';
 import { findImageByIdForUser } from './repositories/images.js';
 import { markJobFailed, markJobProcessing, markJobReady } from './repositories/jobs.js';
 import { getObject, putObject } from './storage/s3.js';
 
-const IDLE_DELAY_MS = 1000;
+const POLL_ERROR_BACKOFF_MS = 5000;
 
 let shuttingDown = false;
 
@@ -53,17 +52,14 @@ async function processJob(message: TransformJobMessage): Promise<void> {
   );
 }
 
-async function pollOnce(): Promise<boolean> {
-  const response = await sqs.send(
-    new ReceiveMessageCommand({ QueueUrl: config.sqsQueueUrl, MaxNumberOfMessages: 1 }),
-  );
+async function pollOnce(): Promise<void> {
+  const received = await receiveJob();
 
-  const message = response.Messages?.[0];
-  if (message === undefined || message.Body === undefined) {
-    return false;
+  if (received === null) {
+    return;
   }
 
-  const job = JSON.parse(message.Body) as TransformJobMessage;
+  const { job, receiptHandle } = received;
   const startedAt = Date.now();
 
   logger.info({ jobId: job.jobId, imageId: job.imageId }, 'job received');
@@ -71,12 +67,7 @@ async function pollOnce(): Promise<boolean> {
   try {
     await processJob(job);
 
-    await sqs.send(
-      new DeleteMessageCommand({
-        QueueUrl: config.sqsQueueUrl,
-        ReceiptHandle: message.ReceiptHandle,
-      }),
-    );
+    await deleteJob(receiptHandle);
 
     logger.info({ jobId: job.jobId, durationMs: Date.now() - startedAt }, 'job completed');
   } catch (err) {
@@ -86,8 +77,6 @@ async function pollOnce(): Promise<boolean> {
     );
     await markJobFailed(job.jobId, err instanceof Error ? err.message : 'Unknown error');
   }
-
-  return true;
 }
 
 function requestShutdown(signal: string): void {
@@ -108,13 +97,11 @@ async function main(): Promise<void> {
   logger.info({ queue: config.sqsQueueUrl, pid: process.pid }, 'worker started');
 
   while (!shuttingDown) {
-    const worked = await pollOnce().catch((err: unknown) => {
-      logger.error({ err }, 'poll failed');
-      return false;
-    });
-
-    if (!worked && !shuttingDown) {
-      await sleep(IDLE_DELAY_MS);
+    try {
+      await pollOnce();
+    } catch (err) {
+      logger.error({ err }, 'poll failed - backing off');
+      await sleep(POLL_ERROR_BACKOFF_MS);
     }
   }
 
