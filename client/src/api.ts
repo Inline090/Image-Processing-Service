@@ -25,6 +25,7 @@ export type Job = {
 const TOKEN_KEY = 'ips.token';
 
 let token: string | null = localStorage.getItem(TOKEN_KEY);
+let unauthorizedHandler: (() => void) | null = null;
 
 export function hasToken(): boolean {
   return token !== null;
@@ -40,6 +41,10 @@ export function setToken(value: string | null): void {
   }
 }
 
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  unauthorizedHandler = handler;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
 
@@ -48,6 +53,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   const response = await fetch(`${BASE}${path}`, { ...init, headers });
+
+  if (response.status === 401 && !path.startsWith('/auth/')) {
+    setToken(null);
+    unauthorizedHandler?.();
+  }
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
