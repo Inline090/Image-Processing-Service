@@ -5,6 +5,8 @@ import type { LoginInput, RegisterInput } from '../schemas/auth.schema.js';
 import { signToken } from '../utils/jwt.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
 
+const PLACEHOLDER_HASH = '$2b$10$IiZ3sPUxSl96PDrVWk4qRumdU7FKYuTBydGbhezDvQgdtqqhxUKvy';
+
 export async function register(req: Request, res: Response): Promise<void> {
   const { email, password } = req.body as RegisterInput;
   const passwordHash = await hashPassword(password);
@@ -24,13 +26,11 @@ export async function login(req: Request, res: Response): Promise<void> {
   const { email, password } = req.body as LoginInput;
 
   const user = await findUserByEmail(email);
-  if (user === null) {
-    throw new AppError('No account found for that email', 404);
-  }
+  const passwordHash = user?.password_hash ?? PLACEHOLDER_HASH;
+  const passwordMatches = await verifyPassword(password, passwordHash);
 
-  const passwordMatches = await verifyPassword(password, user.password_hash);
-  if (!passwordMatches) {
-    throw new AppError('Incorrect password', 401);
+  if (user === null || !passwordMatches) {
+    throw new AppError('Invalid email or password', 401);
   }
 
   const token = signToken({ sub: user.id, email: user.email });

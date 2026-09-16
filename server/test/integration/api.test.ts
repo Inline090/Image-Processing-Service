@@ -133,6 +133,21 @@ describe('auth', () => {
     assert.equal(response.status, 401);
   });
 
+  it('answers identically for an unknown email and a wrong password', async () => {
+    const unknownEmail = await fetch(
+      `${baseUrl}/api/auth/login`,
+      jsonRequest({ email: `nobody-${runId}@example.com`, password }),
+    );
+    const wrongPassword = await fetch(
+      `${baseUrl}/api/auth/login`,
+      jsonRequest({ email: emailA, password: 'definitely-wrong' }),
+    );
+
+    assert.equal(unknownEmail.status, 401);
+    assert.equal(wrongPassword.status, 401);
+    assert.deepEqual(await unknownEmail.json(), await wrongPassword.json());
+  });
+
   it('rejects /me without a token', async () => {
     const response = await fetch(`${baseUrl}/api/auth/me`);
 
