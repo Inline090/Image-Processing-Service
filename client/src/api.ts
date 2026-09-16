@@ -95,3 +95,20 @@ export async function transformImage(id: string, options: Record<string, unknown
 
   return result.job;
 }
+
+export type ImagePage = {
+  images: Image[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+};
+
+export function listImages(page: number, limit: number): Promise<ImagePage> {
+  return request<ImagePage>(`/images?page=${page}&limit=${limit}`);
+}
+
+export async function getJob(id: string): Promise<Job> {
+  const result = await request<{ job: Job }>(`/jobs/${id}`);
+  return result.job;
+}

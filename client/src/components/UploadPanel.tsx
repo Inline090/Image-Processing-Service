@@ -3,7 +3,11 @@ import { transformImage, uploadImage, type Job } from '../api';
 
 const FORMATS = ['webp', 'jpeg', 'png'];
 
-export function UploadPanel() {
+type Props = {
+  onJobQueued: (jobId: string) => void;
+};
+
+export function UploadPanel({ onJobQueued }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [width, setWidth] = useState('400');
@@ -61,6 +65,7 @@ export function UploadPanel() {
       const image = await uploadImage(file);
       const queued = await transformImage(image.id, buildOptions());
       setJob(queued);
+      onJobQueued(queued.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
