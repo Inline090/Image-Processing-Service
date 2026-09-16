@@ -68,17 +68,21 @@ async function pollOnce(): Promise<boolean> {
 
   logger.info({ jobId: job.jobId, imageId: job.imageId }, 'job received');
 
-  await sqs.send(
-    new DeleteMessageCommand({ QueueUrl: config.sqsQueueUrl, ReceiptHandle: message.ReceiptHandle }),
-  );
-
   try {
     await processJob(job);
+
+    await sqs.send(
+      new DeleteMessageCommand({
+        QueueUrl: config.sqsQueueUrl,
+        ReceiptHandle: message.ReceiptHandle,
+      }),
+    );
+
     logger.info({ jobId: job.jobId, durationMs: Date.now() - startedAt }, 'job completed');
   } catch (err) {
     logger.error(
       { err, jobId: job.jobId, durationMs: Date.now() - startedAt },
-      'job failed',
+      'job failed - message left on the queue for retry',
     );
     await markJobFailed(job.jobId, err instanceof Error ? err.message : 'Unknown error');
   }
