@@ -3,7 +3,13 @@ import { config } from './config.js';
 import { pool } from './db/pool.js';
 import { logger } from './logger.js';
 import { transformImage } from './processing/transform.js';
-import { deleteJob, ensureQueue, receiveJob, type TransformJobMessage } from './queue/sqs.js';
+import {
+  deleteJob,
+  ensureQueue,
+  MAX_RECEIVE_COUNT,
+  receiveJob,
+  type TransformJobMessage,
+} from './queue/sqs.js';
 import { findImageByIdForUser } from './repositories/images.js';
 import { markJobFailed, markJobProcessing, markJobReady } from './repositories/jobs.js';
 import { getObject, putObject } from './storage/s3.js';
@@ -62,7 +68,17 @@ async function pollOnce(): Promise<void> {
   const { job, receiptHandle } = received;
   const startedAt = Date.now();
 
-  logger.info({ jobId: job.jobId, imageId: job.imageId }, 'job received');
+  logger.info(
+    { jobId: job.jobId, imageId: job.imageId, receiveCount: received.receiveCount },
+    'job received',
+  );
+
+  if (received.receiveCount >= MAX_RECEIVE_COUNT) {
+    logger.warn(
+      { jobId: job.jobId, receiveCount: received.receiveCount },
+      'last attempt - another failure moves this message to the dead-letter queue',
+    );
+  }
 
   try {
     await processJob(job);

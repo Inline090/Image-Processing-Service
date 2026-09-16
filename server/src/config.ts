@@ -43,5 +43,6 @@ export const config = {
   s3Endpoint: optional('S3_ENDPOINT', ''),
   sqsEndpoint: optional('SQS_ENDPOINT', ''),
   sqsQueueUrl: optional('SQS_QUEUE_URL', 'http://localhost:9324/000000000000/transformations'),
+  sqsVisibilityTimeout: readInt('SQS_VISIBILITY_TIMEOUT', 300, 1),
   maxInputPixels: readInt('MAX_INPUT_PIXELS', 50_000_000, 1),
 } as const;

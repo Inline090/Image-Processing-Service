@@ -1,6 +1,7 @@
 import {
   CreateQueueCommand,
   DeleteMessageCommand,
+  GetQueueAttributesCommand,
   GetQueueUrlCommand,
   ReceiveMessageCommand,
   SendMessageCommand,
@@ -16,8 +17,10 @@ export const sqs = new SQSClient({
 });
 
 const QUEUE_NAME = 'transformations';
-const VISIBILITY_TIMEOUT_SECONDS = 300;
+const DEAD_LETTER_QUEUE_NAME = 'transformations-dlq';
 const WAIT_TIME_SECONDS = 20;
+
+export const MAX_RECEIVE_COUNT = 3;
 
 export type TransformJobMessage = {
   jobId: string;
@@ -29,21 +32,62 @@ export type TransformJobMessage = {
 export type ReceivedJob = {
   job: TransformJobMessage;
   receiptHandle: string;
+  receiveCount: number;
 };
 
 let queueReady: Promise<void> | null = null;
 
-async function configureQueue(): Promise<void> {
-  const attributes = { VisibilityTimeout: String(VISIBILITY_TIMEOUT_SECONDS) };
-
+async function resolveQueueUrl(name: string): Promise<string> {
   try {
-    await sqs.send(new GetQueueUrlCommand({ QueueName: QUEUE_NAME }));
+    const found = await sqs.send(new GetQueueUrlCommand({ QueueName: name }));
+
+    if (found.QueueUrl !== undefined) {
+      return found.QueueUrl;
+    }
   } catch {
-    await sqs.send(new CreateQueueCommand({ QueueName: QUEUE_NAME, Attributes: attributes }));
+    // not created yet
   }
 
+  const created = await sqs.send(new CreateQueueCommand({ QueueName: name }));
+
+  if (created.QueueUrl === undefined) {
+    throw new Error(`Could not create queue: ${name}`);
+  }
+
+  return created.QueueUrl;
+}
+
+async function queueArn(queueUrl: string): Promise<string> {
+  const { Attributes } = await sqs.send(
+    new GetQueueAttributesCommand({ QueueUrl: queueUrl, AttributeNames: ['QueueArn'] }),
+  );
+
+  const arn = Attributes?.QueueArn;
+
+  if (arn === undefined) {
+    throw new Error(`Queue has no ARN: ${queueUrl}`);
+  }
+
+  return arn;
+}
+
+async function configureQueue(): Promise<void> {
+  const deadLetterUrl = await resolveQueueUrl(DEAD_LETTER_QUEUE_NAME);
+  const deadLetterArn = await queueArn(deadLetterUrl);
+
+  await resolveQueueUrl(QUEUE_NAME);
+
   await sqs.send(
-    new SetQueueAttributesCommand({ QueueUrl: config.sqsQueueUrl, Attributes: attributes }),
+    new SetQueueAttributesCommand({
+      QueueUrl: config.sqsQueueUrl,
+      Attributes: {
+        VisibilityTimeout: String(config.sqsVisibilityTimeout),
+        RedrivePolicy: JSON.stringify({
+          deadLetterTargetArn: deadLetterArn,
+          maxReceiveCount: String(MAX_RECEIVE_COUNT),
+        }),
+      },
+    }),
   );
 }
 
@@ -69,6 +113,7 @@ export async function receiveJob(): Promise<ReceivedJob | null> {
       QueueUrl: config.sqsQueueUrl,
       MaxNumberOfMessages: 1,
       WaitTimeSeconds: WAIT_TIME_SECONDS,
+      MessageSystemAttributeNames: ['ApproximateReceiveCount'],
     }),
   );
 
@@ -81,6 +126,7 @@ export async function receiveJob(): Promise<ReceivedJob | null> {
   return {
     job: JSON.parse(message.Body) as TransformJobMessage,
     receiptHandle: message.ReceiptHandle,
+    receiveCount: Number(message.Attributes?.ApproximateReceiveCount ?? '1'),
   };
 }
 
