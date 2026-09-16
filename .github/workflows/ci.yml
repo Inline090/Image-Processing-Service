@@ -16,6 +16,9 @@ jobs:
       DATABASE_URL: postgres://ips:ips@localhost:5432/image_processing
       AWS_REGION: us-east-1
       S3_BUCKET: image-processing-originals
+      AWS_ACCESS_KEY_ID: ci-placeholder
+      AWS_SECRET_ACCESS_KEY: ci-placeholder
+      AWS_EC2_METADATA_DISABLED: 'true'
       SQS_QUEUE_URL: http://localhost:9324/000000000000/transformations
 
     services:
