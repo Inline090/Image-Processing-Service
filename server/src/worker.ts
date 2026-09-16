@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { config } from './config.js';
 import { pool } from './db/pool.js';
 import { logger } from './logger.js';
 import { transformImage } from './processing/transform.js';
@@ -105,12 +104,12 @@ function requestShutdown(signal: string): void {
 }
 
 async function main(): Promise<void> {
-  await ensureQueue();
+  const queue = await ensureQueue();
 
   process.on('SIGINT', () => requestShutdown('SIGINT'));
   process.on('SIGTERM', () => requestShutdown('SIGTERM'));
 
-  logger.info({ queue: config.sqsQueueUrl, pid: process.pid }, 'worker started');
+  logger.info({ queue, pid: process.pid }, 'worker started');
 
   while (!shuttingDown) {
     try {

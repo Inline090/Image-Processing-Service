@@ -147,7 +147,6 @@ Copy `server/.env.example` to `server/.env`. `JWT_SECRET` is the only value you 
 | `JWT_SECRET`             | **Required.** Signing key for bearer tokens                |
 | `S3_BUCKET`              | Bucket for originals and outputs                           |
 | `S3_ENDPOINT`            | Set for MinIO, empty for real AWS                          |
-| `SQS_QUEUE_URL`          | Queue the API publishes to                                 |
 | `SQS_ENDPOINT`           | Set for ElasticMQ, empty for real AWS                      |
 | `SQS_VISIBILITY_TIMEOUT` | How long a message stays invisible while it is processed   |
 | `MAX_INPUT_PIXELS`       | Decode-time guard against decompression bombs, default 50M |

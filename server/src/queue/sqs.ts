@@ -35,51 +35,58 @@ export type ReceivedJob = {
   receiveCount: number;
 };
 
-let queueReady: Promise<void> | null = null;
+let queueReady: Promise<string> | null = null;
 
-async function resolveQueueUrl(name: string): Promise<string> {
+async function queueUrl(name: string): Promise<string> {
+  const found = await sqs
+    .send(new GetQueueUrlCommand({ QueueName: name }))
+    .catch(() => null);
+
+  if (found?.QueueUrl !== undefined) {
+    return found.QueueUrl;
+  }
+
   try {
-    const found = await sqs.send(new GetQueueUrlCommand({ QueueName: name }));
+    const created = await sqs.send(new CreateQueueCommand({ QueueName: name }));
 
-    if (found.QueueUrl !== undefined) {
-      return found.QueueUrl;
+    if (created.QueueUrl === undefined) {
+      throw new Error(`Could not create queue: ${name}`);
     }
-  } catch {
-    // not created yet
+
+    return created.QueueUrl;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+
+    throw new Error(
+      `Queue "${name}" does not exist and could not be created (${reason}). ` +
+        'Create it before starting the app, or grant sqs:CreateQueue to this user.',
+    );
   }
-
-  const created = await sqs.send(new CreateQueueCommand({ QueueName: name }));
-
-  if (created.QueueUrl === undefined) {
-    throw new Error(`Could not create queue: ${name}`);
-  }
-
-  return created.QueueUrl;
 }
 
-async function queueArn(queueUrl: string): Promise<string> {
+async function queueArn(url: string): Promise<string> {
   const { Attributes } = await sqs.send(
-    new GetQueueAttributesCommand({ QueueUrl: queueUrl, AttributeNames: ['QueueArn'] }),
+    new GetQueueAttributesCommand({ QueueUrl: url, AttributeNames: ['QueueArn'] }),
   );
 
   const arn = Attributes?.QueueArn;
 
   if (arn === undefined) {
-    throw new Error(`Queue has no ARN: ${queueUrl}`);
+    throw new Error(`Queue has no ARN: ${url}`);
   }
 
   return arn;
 }
 
-async function configureQueue(): Promise<void> {
-  const deadLetterUrl = await resolveQueueUrl(DEAD_LETTER_QUEUE_NAME);
+async function configureQueue(): Promise<string> {
+  const deadLetterUrl = await queueUrl(DEAD_LETTER_QUEUE_NAME);
   const deadLetterArn = await queueArn(deadLetterUrl);
 
-  await resolveQueueUrl(QUEUE_NAME);
+  const mainUrl = await queueUrl(QUEUE_NAME);
 
   await sqs.send(
     new SetQueueAttributesCommand({
-      QueueUrl: config.sqsQueueUrl,
+      QueueUrl: mainUrl,
       Attributes: {
         VisibilityTimeout: String(config.sqsVisibilityTimeout),
         RedrivePolicy: JSON.stringify({
@@ -89,28 +96,27 @@ async function configureQueue(): Promise<void> {
       },
     }),
   );
+
+  return mainUrl;
 }
 
-export function ensureQueue(): Promise<void> {
+export function ensureQueue(): Promise<string> {
   queueReady ??= configureQueue();
   return queueReady;
 }
 
 export async function publishTransformJob(message: TransformJobMessage): Promise<void> {
-  await ensureQueue();
+  const url = await ensureQueue();
 
-  await sqs.send(
-    new SendMessageCommand({
-      QueueUrl: config.sqsQueueUrl,
-      MessageBody: JSON.stringify(message),
-    }),
-  );
+  await sqs.send(new SendMessageCommand({ QueueUrl: url, MessageBody: JSON.stringify(message) }));
 }
 
 export async function receiveJob(): Promise<ReceivedJob | null> {
+  const url = await ensureQueue();
+
   const response = await sqs.send(
     new ReceiveMessageCommand({
-      QueueUrl: config.sqsQueueUrl,
+      QueueUrl: url,
       MaxNumberOfMessages: 1,
       WaitTimeSeconds: WAIT_TIME_SECONDS,
       MessageSystemAttributeNames: ['ApproximateReceiveCount'],
@@ -131,7 +137,7 @@ export async function receiveJob(): Promise<ReceivedJob | null> {
 }
 
 export async function deleteJob(receiptHandle: string): Promise<void> {
-  await sqs.send(
-    new DeleteMessageCommand({ QueueUrl: config.sqsQueueUrl, ReceiptHandle: receiptHandle }),
-  );
+  const url = await ensureQueue();
+
+  await sqs.send(new DeleteMessageCommand({ QueueUrl: url, ReceiptHandle: receiptHandle }));
 }
