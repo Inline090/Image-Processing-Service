@@ -39,13 +39,11 @@
 
 ## Overview
 
-Most image services process on the request thread: the client uploads, waits, and the connection stays open while the CPU works. **This one deliberately doesn't.**
+Image processing is handled asynchronously instead of on the request thread. The API validates the upload, creates a job row, and publishes a message to a queue. A separate worker handles the decoding and encoding using Sharp and writes the result back to storage. This prevents CPU-heavy operations, such as resizing a 40-megapixel image, from blocking request threads and allows the API to be restarted or scaled without dropping in-flight work.
 
-The API stays thin. It validates the upload, writes a job row, and publishes a message to a queue. A separate worker does the decoding and encoding with Sharp, then writes the result back to storage. A 40-megapixel resize therefore can't tie up a request thread, and the API can be restarted or scaled without dropping in-flight work.
+Each transformation is identified using the image and the exact options requested. If the same transformation is requested again, the existing result is returned instead of running the processing pipeline again. This avoids unnecessary processing while ensuring that different transformation options are cached separately.
 
-Every transform is keyed by the image plus the exact options requested. Ask for the same thing twice and the second call returns the existing result instead of re-running the pipeline — the whole point of a cache, and easy to lose the moment you compare options loosely.
-
-Failures are treated as normal rather than exceptional. A job that throws is **retried, not dropped** — the message stays on the queue until the work genuinely succeeds. One that keeps throwing is parked in a **dead-letter queue** after three attempts instead of looping forever, so a single poison message can't occupy a worker indefinitely.
+Failed jobs are retried instead of being dropped. The message remains in the queue until the work succeeds. If a job continues to fail, it is moved to a dead-letter queue after three attempts, preventing a single failing message from continuously occupying a worker.
 
 ## Quick Start
 
