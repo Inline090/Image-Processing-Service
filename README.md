@@ -1,41 +1,6 @@
-<div align="center">
-  <h1>Image Processing Service</h1>
-  <p><strong>Upload once. Transform on demand.</strong></p>
+# Image Processing Service
 
-  <p>
-    A self-hosted image pipeline: a JWT-secured API that accepts uploads, queues transform jobs, and serves Sharp-processed results straight out of object storage — with retries, a dead-letter queue and a cached result per request.
-  </p>
-
-  <br />
-
-<a href="#quick-start"><strong>Quick Start</strong></a> ·
-<a href="https://github.com/Inline090/Image-Processing-Service/issues"><strong>Report Bug</strong></a> ·
-<a href="https://github.com/Inline090/Image-Processing-Service/pulls"><strong>Request Feature</strong></a>
-
-<br /><br />
-
-  <a href="https://github.com/Inline090/Image-Processing-Service/actions/workflows/ci.yml">
-    <img src="https://github.com/Inline090/Image-Processing-Service/actions/workflows/ci.yml/badge.svg" alt="CI" />
-  </a>
-</div>
-
-<hr />
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Quick Start](#quick-start)
-- [How It Works](#how-it-works)
-- [Tech Stack](#tech-stack)
-- [API Reference](#api-reference)
-- [Transform Options](#transform-options)
-- [Configuration](#configuration)
-- [Running The Stack](#running-the-stack)
-- [Testing](#testing)
-- [Known Limitations](#known-limitations)
-- [License](#license)
-
-<hr />
+An image processing service built with Node.js, Express, TypeScript, PostgreSQL, AWS S3, AWS SQS and Sharp. Upload an image, request a transformation, and a background worker processes it and stores the result.
 
 ## Overview
 
@@ -45,75 +10,148 @@ Each transformation is identified using the image and the exact options requeste
 
 Failed jobs are retried instead of being dropped. The message remains in the queue until the work succeeds. If a job continues to fail, it is moved to a dead-letter queue after three attempts, preventing a single failing message from continuously occupying a worker.
 
+## Features
+
+- **JWT Authentication**: Register and log in with email and password
+- **Image Upload**: Multipart uploads up to 10 MB, stored in a private S3 bucket
+- **Async Processing**: Transformations are queued and handled by a separate worker
+- **Transform Pipeline**: Resize, crop, rotate, grayscale, sepia, watermark and format conversion with Sharp
+- **Result Caching**: Requesting the same transformation returns the stored result instead of re-running it
+- **Retries and Dead Letters**: Failed jobs are retried, and messages that keep failing move to a dead-letter queue
+- **Private Storage**: Images are served through short-lived pre-signed URLs
+- **Owner Scoping**: Users can only list, read and transform their own images
+
 ## Quick Start
 
-The fastest way in is Docker for the backing services and npm for the application.
+### Prerequisites
+
+- Node.js 20+ and npm
+- Docker, for PostgreSQL, MinIO (S3) and ElasticMQ (SQS)
+
+### 1. Clone and Install
 
 ```bash
-docker compose up -d                  # postgres, minio (S3), elasticmq (SQS)
+git clone https://github.com/Inline090/Image-Processing-Service.git
+cd "Image Processing Service"
 npm install
-cp server/.env.example server/.env
-npm run migrate --workspace=server    # create the tables
 ```
 
-Then start the three processes and open the dashboard at **http://localhost:5173**:
+### 2. Start the Backing Services
 
 ```bash
-npm run dev                           # api     -> http://localhost:3000
-npm run worker --workspace=server     # worker  -> consumes the queue
-npm run dev:client                    # client  -> http://localhost:5173
+docker compose up -d
 ```
 
-The worker in that second command is not optional. Without it the API happily accepts uploads and returns job ids, but every job sits at `pending` forever.
+This starts PostgreSQL, MinIO, ElasticMQ and a one-shot container that creates the bucket. It is safe to re-run.
+
+### 3. Configure the Environment
+
+```bash
+cp server/.env.example server/.env
+```
+
+`JWT_SECRET` is the only value you have to supply. Everything else has a working local default.
+
+- `S3_ENDPOINT` and `SQS_ENDPOINT` are set for the local containers. Leave both empty to point the same code at real AWS.
+- `MAX_INPUT_PIXELS` caps the decoded size of an upload, default 50 megapixels.
+- `SQS_VISIBILITY_TIMEOUT` must exceed the slowest job, or a message can be picked up twice.
+
+### 4. Create the Database Tables
+
+```bash
+npm run migrate --workspace=server
+```
+
+Migrations run in order and are recorded in `schema_migrations`, so re-running is safe.
+
+### 5. Run the Application
+
+Start each of these in its own terminal:
+
+```bash
+npm run dev                        # api    -> http://localhost:3000
+npm run worker --workspace=server  # worker -> consumes the queue
+npm run dev:client                 # client -> http://localhost:5173
+```
+
+The worker is not optional. Without it the API still accepts uploads and returns job ids, but every job stays at `pending`.
+
+Visit `http://localhost:5173` for the client.
+
+### Service URLs
+
+- Client - http://localhost:5173
+- API - http://localhost:3000
+- MinIO console - http://localhost:9001, `minioadmin` / `minioadmin`
+- ElasticMQ UI - http://localhost:9325
+- PostgreSQL - `localhost:5432`, database `image_processing`, `ips` / `ips`
+
+## Project Structure
+
+```
+server/
+├── migrations/          # numbered .sql migrations
+└── src/
+    ├── controllers/     # request handlers
+    ├── db/              # pool, migration runner, row types
+    ├── middleware/      # auth, validation, rate limiting, upload, errors
+    ├── processing/      # the Sharp pipeline and options hashing
+    ├── queue/           # SQS client
+    ├── repositories/    # typed SQL per table
+    ├── routes/          # route definitions
+    ├── schemas/         # zod schemas
+    ├── storage/         # S3 client
+    ├── utils/           # jwt and password hashing
+    ├── app.ts           # express wiring
+    ├── worker.ts        # queue consumer
+    └── index.ts         # API entry point
+
+client/
+└── src/
+    ├── components/      # auth, upload, job status and gallery panels
+    ├── api.ts           # API client
+    ├── poll.ts          # job polling with backoff
+    └── App.tsx
+```
 
 ## How It Works
 
-Requests never block on image work. Five steps take a file from upload to download:
+1. **Upload.** `POST /api/images` takes a multipart file, checks the declared type and the 10 MB limit, and puts the original in the `image-processing-originals` bucket.
 
-1. **Upload.** `POST /api/images` takes a multipart file, checks the declared type and the 10 MB ceiling, and streams the original into the `image-processing-originals` bucket.
+2. **Enqueue.** The API writes a `jobs` row with status `pending` and publishes a message carrying the job id, image id, owner and transform options. It returns `202` straight away.
 
-2. **Enqueue.** The API writes a `jobs` row with status `pending` and publishes a message carrying the job id, image id, owner and transform options. It returns `202` immediately. Nothing has been decoded yet.
+3. **Process.** The worker long-polls the queue, flips the job to `processing`, fetches the original and runs it through the Sharp pipeline: decode once, crop and rotate, resize, colour operations, watermark, then encode to the requested format. The result goes to storage and the job flips to `ready`.
 
-3. **Process.** The worker long-polls the queue, flips the job to `processing`, fetches the original, and runs it through the Sharp pipeline — decode once, apply crop and rotate, then resize, then the colour operations, then the watermark, then encode to the requested format. The output goes back to storage and the job flips to `ready` with its dimensions and output key.
+4. **Retry.** A failed job is not deleted from the queue. The message becomes visible again after the visibility timeout, so a dropped connection or a container restart resolves itself on the next pass. After three receives SQS moves the message to the dead-letter queue and the job row is left `failed` with the error attached.
 
-4. **Retry, then give up.** A failed job is **not** deleted from the queue. The message becomes visible again after the visibility timeout, so a transient problem — a container restart, a dropped connection — resolves itself on the next pass. After three receives SQS moves the message to the dead-letter queue, and the job row is left `failed` with the error attached. The worker reads `ApproximateReceiveCount` so it can log the final attempt instead of going quiet.
+5. **Deliver.** The client polls `GET /api/jobs/:id`. Once the job is `ready` it gets a short-lived pre-signed URL and fetches the result directly from storage.
 
-5. **Deliver.** The client polls `GET /api/jobs/:id`. Once the job is `ready` it gets a short-lived pre-signed URL for the output, so the browser fetches the result directly from storage rather than through the API.
+## Database Schema
 
-## Tech Stack
+- **users**: id, email, password_hash, created_at
+- **images**: id, user_id, original_key, processed_key, mime_type, size_bytes, width, height, status, created_at
+- **jobs**: id, image_id, user_id, options, options_hash, status, attempts, error, processed_key, width, height, format, created_at, updated_at
+- **schema_migrations**: applied migration names
 
-Chosen so that every claim maps to real infrastructure running locally, not an imitation of it.
-
-- **Frontend:** React 19, Vite, TypeScript in strict mode
-- **Backend:** Node.js, Express 5, TypeScript, `zod` for request validation
-- **Database:** PostgreSQL 16 with plain SQL through `pg` — no ORM, so the queries stay visible — and numbered `.sql` migrations
-- **Storage:** S3 through AWS SDK v3, with MinIO running locally
-- **Queue:** SQS through AWS SDK v3, with ElasticMQ running locally, plus a dead-letter queue for poison messages
-- **Processing:** Sharp for the transform pipeline
-- **Security:** bcrypt password hashing, JWT bearer tokens, per-IP rate limiting, and owner-scoped queries throughout
-- **Tooling:** Prettier, husky with lint-staged, `node:test`, GitHub Actions, and ESLint on the server alongside oxlint on the client
-
-MinIO and ElasticMQ speak the real S3 and SQS APIs, so leaving `S3_ENDPOINT` and `SQS_ENDPOINT` empty is the only change needed to point the same code at AWS.
-
-## API Reference
+## API Endpoints
 
 Every success response is `{ resource: ... }` and every error is `{ error: { message } }`.
 
-| Method | Endpoint                    | Notes                                                       |
-| ------ | --------------------------- | ----------------------------------------------------------- |
-| GET    | `/api/health`               | liveness check                                              |
-| POST   | `/api/auth/register`        | `{ email, password }`, password min 8 characters → `201`    |
-| POST   | `/api/auth/login`           | `{ email, password }` → `{ token }`                         |
-| GET    | `/api/auth/me`              | bearer token                                                |
-| POST   | `/api/images`               | multipart, field `image`, max 10 MB → `201`                 |
-| GET    | `/api/images`               | `?page=1&limit=20`, own images only, newest first           |
-| GET    | `/api/images/:id`           | `404` for someone else's image                              |
-| POST   | `/api/images/:id/transform` | → `202 { job }`, or `200` if that exact transform is cached |
-| GET    | `/api/jobs/:id`             | poll job status                                             |
+| Method | Endpoint                    | Description                                                    |
+| ------ | --------------------------- | -------------------------------------------------------------- |
+| GET    | `/api/health`               | Liveness check                                                 |
+| POST   | `/api/auth/register`        | `{ email, password }`, password min 8 characters               |
+| POST   | `/api/auth/login`           | `{ email, password }`, returns a bearer token                  |
+| GET    | `/api/auth/me`              | Current user, bearer token                                     |
+| POST   | `/api/images`               | Multipart, field `image`, max 10 MB                            |
+| GET    | `/api/images`               | `?page=1&limit=20`, own images only, newest first              |
+| GET    | `/api/images/:id`           | Returns `404` for someone else's image                         |
+| POST   | `/api/images/:id/transform` | Returns `202` with a job, or `200` if that transform is cached |
+| GET    | `/api/jobs/:id`             | Job status, for polling                                        |
 
 ## Transform Options
 
-Send any combination; anything outside this set is rejected.
+Send any combination. Anything outside this set is rejected.
 
 ```json
 {
@@ -129,87 +167,70 @@ Send any combination; anything outside this set is rejected.
 }
 ```
 
-- `width` / `height` — up to 4096
-- `fit` — one of `cover`, `contain`, `fill`, `inside`, `outside`
-- `format` — one of `webp`, `jpeg`, `png`
-- `watermark.position` — corner placement, and the overlay is scaled to the image so small thumbnails don't fail
+- `width` / `height` - up to 4096
+- `fit` - one of `cover`, `contain`, `fill`, `inside`, `outside`
+- `format` - one of `webp`, `jpeg`, `png`
+- `watermark.position` - corner placement. The overlay is scaled to the output, so small thumbnails do not fail.
 
-## Configuration
+## Available Scripts
 
-Copy `server/.env.example` to `server/.env`. `JWT_SECRET` is the only value you must supply yourself — the API refuses to boot without it, and everything else has a working local default.
+- `npm run dev` - Start the API in watch mode
+- `npm run worker --workspace=server` - Start the queue worker in watch mode
+- `npm run dev:client` - Start the Vite dev server
+- `npm run migrate --workspace=server` - Apply database migrations
+- `npm run build --workspace=server` - Compile the server to `dist/`
+- `npm test --workspace=server` - Run the unit tests
+- `npm run test:integration --workspace=server` - Run the integration tests
+- `npm run lint` - Run ESLint over the server
+- `npm run typecheck` - Typecheck the server
+- `npm run check` - Lint and typecheck in one go
 
-| Variable                 | Purpose                                                    |
-| ------------------------ | ---------------------------------------------------------- |
-| `PORT`                   | API port, default `3000`                                   |
-| `DATABASE_URL`           | Postgres connection string                                 |
-| `JWT_SECRET`             | **Required.** Signing key for bearer tokens                |
-| `S3_BUCKET`              | Bucket for originals and outputs                           |
-| `S3_ENDPOINT`            | Set for MinIO, empty for real AWS                          |
-| `SQS_ENDPOINT`           | Set for ElasticMQ, empty for real AWS                      |
-| `SQS_VISIBILITY_TIMEOUT` | How long a message stays invisible while it is processed   |
-| `MAX_INPUT_PIXELS`       | Decode-time guard against decompression bombs, default 50M |
+## Tech Stack
 
-## Running The Stack
+- **Frontend**: React 19, TypeScript, Vite
+- **Backend**: Node.js, Express 5, TypeScript
+- **Database**: PostgreSQL 16 with plain SQL through `pg`, and numbered `.sql` migrations
+- **Storage**: S3 through AWS SDK v3, with MinIO running locally
+- **Queue**: SQS through AWS SDK v3, with ElasticMQ running locally and a dead-letter queue
+- **Image processing**: Sharp
+- **Validation**: zod
+- **Security**: bcrypt, JWT bearer tokens, rate limiting
+- **Tooling**: Prettier, husky with lint-staged, node:test, GitHub Actions
 
-For day-to-day work, start the services once and leave them running.
+MinIO and ElasticMQ speak the real S3 and SQS APIs, so leaving `S3_ENDPOINT` and `SQS_ENDPOINT` empty is the only change needed to point this code at AWS.
 
-### 1. Backing Services
+## Security
 
-```bash
-docker compose up -d
-```
-
-This brings up Postgres, MinIO, ElasticMQ, and a one-shot container that creates the bucket. It is safe to re-run.
-
-If you have older containers from ad-hoc `docker run` commands, stop them first — compose binds the same ports.
-
-### 2. Database
-
-```bash
-npm run migrate --workspace=server
-```
-
-Applies any unapplied migrations in order and records them in `schema_migrations`, so re-running is safe.
-
-### 3. API and Worker
-
-```bash
-npm run dev                           # api    -> :3000
-npm run worker --workspace=server     # worker
-```
-
-Both watch their source and restart on change. The worker logs each job it receives, and warns on the attempt that will send a message to the dead-letter queue.
-
-### 4. Clients for the Services
-
-- MinIO console — http://localhost:9001, `minioadmin` / `minioadmin`
-- ElasticMQ UI — http://localhost:9325
-- Postgres — `localhost:5432`, database `image_processing`, `ips` / `ips`
+- Passwords are hashed with bcrypt before they reach the database
+- Requests are authenticated with JWT bearer tokens
+- Every image query is scoped to the authenticated user
+- Transform options are validated against a whitelist schema
+- Uploads are checked for type and size, and capped by pixel count when decoded
+- The bucket is private, and images are only reachable through short-lived pre-signed URLs
+- Auth endpoints are rate limited
 
 ## Testing
 
 ```bash
-npm test --workspace=server                  # unit — no infrastructure required
-npm run test:integration --workspace=server  # integration — needs Postgres
+npm test --workspace=server                  # unit tests, no infrastructure needed
+npm run test:integration --workspace=server  # needs docker compose up -d
 npm run check                                # lint + typecheck
 ```
 
-The unit suite covers the Sharp pipeline, JWT handling, password hashing and the limits. The integration suite runs the real app against the real database, storage and queue, so it needs `docker compose up -d` first.
+The unit suite covers the Sharp pipeline, JWT handling, password hashing and the validation limits. CI runs on every push: it lints both workspaces, typechecks the server, builds the client, applies the migrations, and runs both suites against a Postgres service container.
 
-CI runs on every push: it lints both workspaces, typechecks the server, builds the client, applies migrations, and runs both test suites against a Postgres service container.
+## Contributing
 
-## Known Limitations
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature-name`
+3. Make your changes and commit: `git commit -m 'Add feature'`
+4. Push to the branch: `git push origin feature-name`
+5. Submit a pull request
 
-- Jobs can't be cancelled once they're queued; it needs a separate cancellation signal the worker can observe.
-- Two identical requests submitted while the first is still running produce two jobs — the cache only matches finished work, so there is no in-flight de-duplication.
-- Cache matching is exact, so asking for the same transform with an extra option re-runs the pipeline.
-- Rate limiting is per IP rather than per user, which shares a budget behind a NAT.
-- Progress is stage-based (`pending` → `processing` → `ready`) because Sharp can't report a percentage.
-- There are no refresh tokens, so a token stays valid until it expires.
+## License
 
-<hr />
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-<div align="center">
-  <p>Distributed under the MIT License.</p>
-  <p>Built by <a href="https://github.com/Inline090">@Navneet</a></p>
-</div>
+---
+
+Built by [@Navneet](https://github.com/Inline090)
