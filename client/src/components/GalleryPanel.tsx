@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { listImages, type Image } from '../api';
+import { listImages, type DownloadVariant, type Image } from '../api';
+import { downloadImage } from '../download';
 
 const PAGE_SIZE = 6;
 
@@ -38,6 +39,15 @@ export function GalleryPanel() {
     };
   }, [page, reloads]);
 
+  async function handleDownload(imageId: string, variant: DownloadVariant): Promise<void> {
+    try {
+      setError(null);
+      await downloadImage(imageId, variant);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start the download');
+    }
+  }
+
   return (
     <section className="panel">
       <header className="panel-header">
@@ -59,6 +69,24 @@ export function GalleryPanel() {
               <strong>{image.status}</strong>
               <span>{Math.round(image.sizeBytes / 1024)} kB</span>
             </p>
+            <div className="card-actions">
+              <button
+                type="button"
+                className="link"
+                onClick={() => void handleDownload(image.id, 'original')}
+              >
+                Original
+              </button>
+              {image.processedUrl !== null && (
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => void handleDownload(image.id, 'processed')}
+                >
+                  Result
+                </button>
+              )}
+            </div>
           </article>
         ))}
       </div>

@@ -22,8 +22,51 @@ export type Job = {
   processedUrl: string | null;
 };
 
-const TOKEN_KEY = 'ips.token';
+export type WatermarkPosition =
+  | 'northwest'
+  | 'north'
+  | 'northeast'
+  | 'west'
+  | 'center'
+  | 'east'
+  | 'southwest'
+  | 'south'
+  | 'southeast';
 
+export type TransformOptions = {
+  width?: number;
+  height?: number;
+  fit?: 'cover' | 'contain' | 'fill' | 'inside' | 'outside';
+  rotate?: number;
+  crop?: { left: number; top: number; width: number; height: number };
+  grayscale?: boolean;
+  sepia?: boolean;
+  format?: 'jpeg' | 'png' | 'webp';
+  watermark?: { text: string; position?: WatermarkPosition };
+  modulate?: {
+    brightness?: number;
+    saturation?: number;
+    hue?: number;
+    lightness?: number;
+  };
+  blur?: number;
+  sharpen?: boolean | { sigma: number; m1?: number; m2?: number };
+  flip?: boolean;
+  flop?: boolean;
+  trim?: boolean | { background?: string; threshold?: number };
+  extend?: {
+    top?: number;
+    bottom?: number;
+    left?: number;
+    right?: number;
+    background?: string;
+  };
+  background?: string;
+  flatten?: boolean;
+  quality?: number;
+};
+
+const TOKEN_KEY = 'ips.token';
 let token: string | null = localStorage.getItem(TOKEN_KEY);
 let unauthorizedHandler: (() => void) | null = null;
 
@@ -96,7 +139,7 @@ export async function uploadImage(file: File): Promise<Image> {
   return result.image;
 }
 
-export async function transformImage(id: string, options: Record<string, unknown>): Promise<Job> {
+export async function transformImage(id: string, options: TransformOptions): Promise<Job> {
   const result = await request<{ job: Job }>(`/images/${id}/transform`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -121,4 +164,17 @@ export function listImages(page: number, limit: number): Promise<ImagePage> {
 export async function getJob(id: string): Promise<Job> {
   const result = await request<{ job: Job }>(`/jobs/${id}`);
   return result.job;
+}
+
+export type DownloadVariant = 'original' | 'processed';
+
+export type Download = {
+  url: string;
+  filename: string;
+};
+
+export async function getDownload(id: string, variant: DownloadVariant): Promise<Download> {
+  const result = await request<{ download: Download }>(`/images/${id}/download?variant=${variant}`);
+
+  return result.download;
 }

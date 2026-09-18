@@ -35,6 +35,8 @@ export function AuthPanel({ onSignedIn }: Props) {
 
   function toggleMode(): void {
     setMode(mode === 'login' ? 'register' : 'login');
+    setEmail('');
+    setPassword('');
     setError(null);
   }
 
