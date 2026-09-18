@@ -15,10 +15,11 @@ Failed jobs are retried instead of being dropped. The message remains in the que
 - **JWT Authentication**: Register and log in with email and password
 - **Image Upload**: Multipart uploads up to 10 MB, stored in a private S3 bucket
 - **Async Processing**: Transformations are queued and handled by a separate worker
-- **Transform Pipeline**: Resize, crop, rotate, grayscale, sepia, watermark and format conversion with Sharp
+- **Transform Pipeline**: Resize, crop, rotate, trim, pad, mirror, modulate, blur, sharpen, grayscale, sepia, watermark, background flattening and format conversion with Sharp
 - **Result Caching**: Requesting the same transformation returns the stored result instead of re-running it
 - **Retries and Dead Letters**: Failed jobs are retried, and messages that keep failing move to a dead-letter queue
 - **Private Storage**: Images are served through short-lived pre-signed URLs
+- **Downloads**: Originals and processed results download under the name they were uploaded with, through a signed URL that is forced to save as an attachment
 - **Owner Scoping**: Users can only list, read and transform their own images
 
 ## Quick Start
@@ -120,7 +121,7 @@ client/
 
 2. **Enqueue.** The API writes a `jobs` row with status `pending` and publishes a message carrying the job id, image id, owner and transform options. It returns `202` straight away.
 
-3. **Process.** The worker long-polls the queue, flips the job to `processing`, fetches the original and runs it through the Sharp pipeline: decode once, crop and rotate, resize, colour operations, watermark, then encode to the requested format. The result goes to storage and the job flips to `ready`.
+3. **Process.** The worker long-polls the queue, flips the job to `processing`, fetches the original and runs it through the Sharp pipeline: decode once, rotate, crop and trim, resize, colour operations, blur and sharpen, mirror, pad and flatten, watermark, then encode to the requested format. The result goes to storage and the job flips to `ready`.
 
 4. **Retry.** A failed job is not deleted from the queue. The message becomes visible again after the visibility timeout, so a dropped connection or a container restart resolves itself on the next pass. After three receives SQS moves the message to the dead-letter queue and the job row is left `failed` with the error attached.
 
@@ -129,7 +130,7 @@ client/
 ## Database Schema
 
 - **users**: id, email, password_hash, created_at
-- **images**: id, user_id, original_key, processed_key, mime_type, size_bytes, width, height, status, created_at
+- **images**: id, user_id, original_key, processed_key, mime_type, processed_mime_type, original_filename, size_bytes, width, height, status, created_at
 - **jobs**: id, image_id, user_id, options, options_hash, status, attempts, error, processed_key, width, height, format, created_at, updated_at
 - **schema_migrations**: applied migration names
 
@@ -137,17 +138,18 @@ client/
 
 Every success response is `{ resource: ... }` and every error is `{ error: { message } }`.
 
-| Method | Endpoint                    | Description                                                    |
-| ------ | --------------------------- | -------------------------------------------------------------- |
-| GET    | `/api/health`               | Liveness check                                                 |
-| POST   | `/api/auth/register`        | `{ email, password }`, password min 8 characters               |
-| POST   | `/api/auth/login`           | `{ email, password }`, returns a bearer token                  |
-| GET    | `/api/auth/me`              | Current user, bearer token                                     |
-| POST   | `/api/images`               | Multipart, field `image`, max 10 MB                            |
-| GET    | `/api/images`               | `?page=1&limit=20`, own images only, newest first              |
-| GET    | `/api/images/:id`           | Returns `404` for someone else's image                         |
-| POST   | `/api/images/:id/transform` | Returns `202` with a job, or `200` if that transform is cached |
-| GET    | `/api/jobs/:id`             | Job status, for polling                                        |
+| Method | Endpoint                    | Description                                                           |
+| ------ | --------------------------- | --------------------------------------------------------------------- |
+| GET    | `/api/health`               | Liveness check                                                        |
+| POST   | `/api/auth/register`        | `{ email, password }`, password min 8 characters, `409` if taken      |
+| POST   | `/api/auth/login`           | `{ email, password }`, returns a bearer token                         |
+| GET    | `/api/auth/me`              | Current user, bearer token                                            |
+| POST   | `/api/images`               | Multipart, field `image`, max 10 MB                                   |
+| GET    | `/api/images`               | `?page=1&limit=20`, own images only, newest first                     |
+| GET    | `/api/images/:id`           | Returns `404` for someone else's image                                |
+| GET    | `/api/images/:id/download`  | `?variant=original` or `processed`, returns a pre-signed download url |
+| POST   | `/api/images/:id/transform` | Returns `202` with a job, or `200` if that transform is cached        |
+| GET    | `/api/jobs/:id`             | Job status, for polling                                               |
 
 ## Transform Options
 
@@ -155,22 +157,56 @@ Send any combination. Anything outside this set is rejected.
 
 ```json
 {
-  "width": 400,
-  "height": 300,
+  "width": 1600,
+  "height": 900,
   "fit": "cover",
   "rotate": 90,
   "crop": { "left": 0, "top": 0, "width": 300, "height": 200 },
+  "trim": true,
+  "extend": { "top": 24, "bottom": 24, "left": 24, "right": 24 },
+  "flip": false,
+  "modulate": { "brightness": 1.1, "saturation": 1.2, "hue": 0, "lightness": 0 },
+  "blur": 2,
+  "sharpen": { "sigma": 1.5 },
   "grayscale": true,
   "sepia": true,
+  "background": "#ffffff",
+  "flatten": true,
   "format": "webp",
+  "quality": 72,
   "watermark": { "text": "hello", "position": "southeast" }
 }
 ```
 
+### Geometry and canvas
+
 - `width` / `height` - up to 4096
-- `fit` - one of `cover`, `contain`, `fill`, `inside`, `outside`
+- `fit` - one of `cover`, `contain`, `fill`, `inside`, `outside`. Only applies to a resize
+- `rotate` - degrees. Runs before the crop
+- `crop` - `{ left, top, width, height }`, taken from the rotated image
+- `trim` - `true` to auto-crop uniform borders, or `{ background, threshold }` where `background` is a hex colour and `threshold` is 0 to 255
+- `extend` - `{ top, bottom, left, right, background }`. Pads the canvas, each side 0 to 4096
+- `flip` / `flop` - mirror vertically / horizontally
+- `background` - a hex colour such as `#ffffff`. Fills `contain` letterboxing, `rotate` corners, `extend` padding and `flatten`
+- `flatten` - merges a transparency channel onto `background`, which defaults to `#ffffff`. Use it before converting a transparent image to JPEG
+
+### Adjustment
+
+- `modulate` - `{ brightness, saturation, hue, lightness }`. `brightness` and `saturation` are multipliers, `hue` is an angle from 0 to 360, `lightness` is 0 to 100
+- `blur` - sigma between 0.3 and 1000
+- `sharpen` - `true` for the defaults, or `{ sigma, m1, m2 }`. `sigma` is required with the object form
+- `grayscale` / `sepia` - booleans
+
+### Output
+
 - `format` - one of `webp`, `jpeg`, `png`
-- `watermark.position` - corner placement. The overlay is scaled to the output, so small thumbnails do not fail.
+- `quality` - 1 to 100, applied to `webp` and `jpeg`, default 82. PNG is encoded losslessly, so the value is ignored for that format
+- `watermark` - `{ text, position }`. The overlay is scaled to the output, so small thumbnails do not fail
+- `watermark.position` - one of `northwest`, `north`, `northeast`, `west`, `center`, `east`, `southwest`, `south`, `southeast`
+
+Operations run in a fixed order rather than the order of the keys: rotate, crop, trim, resize, colour, blur, sharpen, mirror, pad, flatten, watermark, encode. Sharpen therefore lands after the resize, so the downscale does not undo it.
+
+Because the cache key is derived from the options, an option that changes the output must also reach the cache key. When adding one, extend `canonicalize` in `server/src/processing/optionsHash.ts` and bump `PIPELINE_VERSION` if the pipeline order or behaviour changes.
 
 ## Available Scripts
 
@@ -207,6 +243,7 @@ MinIO and ElasticMQ speak the real S3 and SQS APIs, so leaving `S3_ENDPOINT` and
 - Transform options are validated against a whitelist schema
 - Uploads are checked for type and size, and capped by pixel count when decoded
 - The bucket is private, and images are only reachable through short-lived pre-signed URLs
+- Downloads sign the `Content-Disposition` into the url, so the saved filename is chosen by the server and a client cannot rewrite it
 - Auth endpoints are rate limited
 
 ## Testing
@@ -217,7 +254,7 @@ npm run test:integration --workspace=server  # needs docker compose up -d
 npm run check                                # lint + typecheck
 ```
 
-The unit suite covers the Sharp pipeline, JWT handling, password hashing and the validation limits. CI runs on every push: it lints both workspaces, typechecks the server, builds the client, applies the migrations, and runs both suites against a Postgres service container.
+The unit suite covers the Sharp pipeline, the transform options cache key, JWT handling, password hashing and the validation limits. CI runs on every push: it lints both workspaces, typechecks the server, builds the client, applies the migrations, and runs both suites against a Postgres service container.
 
 ## Contributing
 
