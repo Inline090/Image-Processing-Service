@@ -1,6 +1,12 @@
 import type { Request, Response } from 'express';
+import type { UserRow } from '../db/types.js';
 import { AppError } from '../middleware/error.js';
-import { createUser, findUserByEmail, findUserById } from '../repositories/users.js';
+import {
+  createUser,
+  DuplicateEmailError,
+  findUserByEmail,
+  findUserById,
+} from '../repositories/users.js';
 import type { LoginInput, RegisterInput } from '../schemas/auth.schema.js';
 import { signToken } from '../utils/jwt.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
@@ -11,7 +17,17 @@ export async function register(req: Request, res: Response): Promise<void> {
   const { email, password } = req.body as RegisterInput;
   const passwordHash = await hashPassword(password);
 
-  const user = await createUser({ email, passwordHash });
+  let user: UserRow;
+
+  try {
+    user = await createUser({ email, passwordHash });
+  } catch (err) {
+    if (err instanceof DuplicateEmailError) {
+      throw new AppError('An account with that email already exists', 409);
+    }
+
+    throw err;
+  }
 
   res.status(201).json({
     user: {
