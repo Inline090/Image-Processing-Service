@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { transformImage, uploadImage, type Job } from '../api';
 
 const FORMATS = ['webp', 'jpeg', 'png'];
@@ -19,12 +19,35 @@ export function UploadPanel({ onJobQueued }: Props) {
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
 
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  function releasePreview(): void {
+    if (preview !== null) {
+      URL.revokeObjectURL(preview);
+    }
+
+    setPreview(null);
+  }
+
+  function clearPickedFile(): void {
+    setFile(null);
+    releasePreview();
+
+    if (fileInput.current !== null) {
+      fileInput.current.value = '';
+    }
+  }
+
   function handleFile(event: ChangeEvent<HTMLInputElement>): void {
     const picked = event.target.files?.[0] ?? null;
 
+    releasePreview();
     setFile(picked);
     setJob(null);
-    setPreview(picked === null ? null : URL.createObjectURL(picked));
+
+    if (picked !== null) {
+      setPreview(URL.createObjectURL(picked));
+    }
   }
 
   function buildOptions(): Record<string, unknown> {
@@ -63,6 +86,8 @@ export function UploadPanel({ onJobQueued }: Props) {
 
     try {
       const image = await uploadImage(file);
+      clearPickedFile();
+
       const queued = await transformImage(image.id, buildOptions());
       setJob(queued);
       onJobQueued(queued.id);
@@ -80,7 +105,7 @@ export function UploadPanel({ onJobQueued }: Props) {
       <form onSubmit={handleSubmit}>
         <label>
           Image
-          <input type="file" accept="image/*" onChange={handleFile} />
+          <input type="file" accept="image/*" ref={fileInput} onChange={handleFile} />
         </label>
 
         {preview !== null && (
