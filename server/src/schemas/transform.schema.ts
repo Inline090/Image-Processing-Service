@@ -12,6 +12,42 @@ const watermarkPositions = [
   'southeast',
 ] as const;
 
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Expected a hex colour such as #ffffff');
+
+const modulateSchema = z
+  .object({
+    brightness: z.number().min(0).max(10).optional(),
+    saturation: z.number().min(0).max(10).optional(),
+    hue: z.number().min(0).max(360).optional(),
+    lightness: z.number().min(0).max(100).optional(),
+  })
+  .strict();
+
+const sharpenSchema = z
+  .object({
+    sigma: z.number().min(0.000001).max(10000),
+    m1: z.number().min(0).max(1000000).optional(),
+    m2: z.number().min(0).max(1000000).optional(),
+  })
+  .strict();
+
+const trimSchema = z
+  .object({
+    background: hexColor.optional(),
+    threshold: z.number().min(0).max(255).optional(),
+  })
+  .strict();
+
+const extendSchema = z
+  .object({
+    top: z.number().int().min(0).max(4096).optional(),
+    bottom: z.number().int().min(0).max(4096).optional(),
+    left: z.number().int().min(0).max(4096).optional(),
+    right: z.number().int().min(0).max(4096).optional(),
+    background: hexColor.optional(),
+  })
+  .strict();
+
 export const transformSchema = z
   .object({
     width: z.number().int().positive().max(4096).optional(),
@@ -37,6 +73,16 @@ export const transformSchema = z
       })
       .strict()
       .optional(),
+    modulate: modulateSchema.optional(),
+    blur: z.number().min(0.3).max(1000).optional(),
+    sharpen: z.union([z.boolean(), sharpenSchema]).optional(),
+    flip: z.boolean().optional(),
+    flop: z.boolean().optional(),
+    trim: z.union([z.boolean(), trimSchema]).optional(),
+    extend: extendSchema.optional(),
+    background: hexColor.optional(),
+    flatten: z.boolean().optional(),
+    quality: z.number().int().min(1).max(100).optional(),
   })
   .strict();
 

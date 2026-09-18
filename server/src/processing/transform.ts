@@ -1,5 +1,8 @@
 import sharp from 'sharp';
 import { config } from '../config.js';
+import { DEFAULT_FIT, DEFAULT_QUALITY, DEFAULT_WATERMARK_POSITION } from './optionsHash.js';
+
+const DEFAULT_FLATTEN_BACKGROUND = '#ffffff';
 
 export type ResizeFit = 'cover' | 'contain' | 'fill' | 'inside' | 'outside';
 
@@ -14,6 +17,32 @@ export type WatermarkPosition =
   | 'south'
   | 'southeast';
 
+export type ModulateOptions = {
+  brightness?: number;
+  saturation?: number;
+  hue?: number;
+  lightness?: number;
+};
+
+export type SharpenOptions = {
+  sigma: number;
+  m1?: number;
+  m2?: number;
+};
+
+export type TrimOptions = {
+  background?: string;
+  threshold?: number;
+};
+
+export type ExtendOptions = {
+  top?: number;
+  bottom?: number;
+  left?: number;
+  right?: number;
+  background?: string;
+};
+
 export type TransformOptions = {
   width?: number;
   height?: number;
@@ -24,6 +53,16 @@ export type TransformOptions = {
   sepia?: boolean;
   format?: 'jpeg' | 'png' | 'webp';
   watermark?: { text: string; position?: WatermarkPosition };
+  modulate?: ModulateOptions;
+  blur?: number;
+  sharpen?: boolean | SharpenOptions;
+  flip?: boolean;
+  flop?: boolean;
+  trim?: boolean | TrimOptions;
+  extend?: ExtendOptions;
+  background?: string;
+  flatten?: boolean;
+  quality?: number;
 };
 
 export type TransformResult = {
@@ -93,12 +132,34 @@ export async function transformImage(
 
   let pipeline = sharp(input, { limitInputPixels: config.maxInputPixels }).autoOrient();
 
+  // Geometry, applied at the original resolution before any downscaling.
   if (options.rotate !== undefined) {
-    pipeline = pipeline.rotate(options.rotate);
+    pipeline =
+      options.background === undefined
+        ? pipeline.rotate(options.rotate)
+        : pipeline.rotate(options.rotate, { background: options.background });
   }
 
   if (options.crop !== undefined) {
     pipeline = pipeline.extract(options.crop);
+  }
+
+  if (options.trim !== undefined && options.trim !== false) {
+    pipeline = options.trim === true ? pipeline.trim() : pipeline.trim(options.trim);
+  }
+
+  if (options.width !== undefined || options.height !== undefined) {
+    pipeline = pipeline.resize({
+      width: options.width,
+      height: options.height,
+      fit: options.fit ?? DEFAULT_FIT,
+      ...(options.background === undefined ? {} : { background: options.background }),
+    });
+  }
+
+  // Colour work, after the resize so it runs on fewer pixels.
+  if (options.modulate !== undefined) {
+    pipeline = pipeline.modulate(options.modulate);
   }
 
   if (options.grayscale === true) {
@@ -109,12 +170,38 @@ export async function transformImage(
     pipeline = pipeline.grayscale().tint({ r: 112, g: 66, b: 20 });
   }
 
-  if (options.width !== undefined || options.height !== undefined) {
-    pipeline = pipeline.resize({
-      width: options.width,
-      height: options.height,
-      fit: options.fit ?? 'cover',
+  // Detail work last, so sharpening is not undone by the downscale.
+  if (options.blur !== undefined) {
+    pipeline = pipeline.blur(options.blur);
+  }
+
+  if (options.sharpen !== undefined && options.sharpen !== false) {
+    pipeline = options.sharpen === true ? pipeline.sharpen() : pipeline.sharpen(options.sharpen);
+  }
+
+  // Mirroring, before the canvas is padded so the padding is never flipped.
+  if (options.flip === true) {
+    pipeline = pipeline.flip();
+  }
+
+  if (options.flop === true) {
+    pipeline = pipeline.flop();
+  }
+
+  if (options.extend !== undefined) {
+    const background = options.extend.background ?? options.background;
+
+    pipeline = pipeline.extend({
+      top: options.extend.top ?? 0,
+      bottom: options.extend.bottom ?? 0,
+      left: options.extend.left ?? 0,
+      right: options.extend.right ?? 0,
+      ...(background === undefined ? {} : { background }),
     });
+  }
+
+  if (options.flatten === true) {
+    pipeline = pipeline.flatten({ background: options.background ?? DEFAULT_FLATTEN_BACKGROUND });
   }
 
   if (options.watermark !== undefined) {
@@ -128,17 +215,19 @@ export async function transformImage(
     pipeline = sharp(sized.data, { limitInputPixels: config.maxInputPixels }).composite([
       {
         input: overlay,
-        gravity: options.watermark.position ?? 'southeast',
+        gravity: options.watermark.position ?? DEFAULT_WATERMARK_POSITION,
       },
     ]);
   }
 
+  const quality = options.quality ?? DEFAULT_QUALITY;
+
   if (options.format === 'jpeg') {
-    pipeline = pipeline.jpeg({ quality: 82 });
+    pipeline = pipeline.jpeg({ quality });
   } else if (options.format === 'png') {
     pipeline = pipeline.png();
   } else if (options.format === 'webp') {
-    pipeline = pipeline.webp({ quality: 82 });
+    pipeline = pipeline.webp({ quality });
   }
 
   const { data, info } = await pipeline.toBuffer({ resolveWithObject: true });

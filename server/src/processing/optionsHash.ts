@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { TransformInput } from '../schemas/transform.schema.js';
 
-const PIPELINE_VERSION = 1;
-const DEFAULT_FIT = 'cover';
-const DEFAULT_WATERMARK_POSITION = 'southeast';
+const PIPELINE_VERSION = 2;
+
+export const DEFAULT_FIT = 'cover';
+export const DEFAULT_WATERMARK_POSITION = 'southeast';
+export const DEFAULT_QUALITY = 82;
 
 function canonicalize(options: TransformInput): string {
   const resizes = options.width !== undefined || options.height !== undefined;
@@ -17,10 +19,45 @@ function canonicalize(options: TransformInput): string {
   const watermark =
     options.watermark === undefined
       ? null
+      : [options.watermark.text, options.watermark.position ?? DEFAULT_WATERMARK_POSITION];
+
+  const modulate =
+    options.modulate === undefined
+      ? null
       : [
-          options.watermark.text,
-          options.watermark.position ?? DEFAULT_WATERMARK_POSITION,
+          options.modulate.brightness ?? null,
+          options.modulate.saturation ?? null,
+          options.modulate.hue ?? null,
+          options.modulate.lightness ?? null,
         ];
+
+  const sharpen =
+    options.sharpen === undefined || options.sharpen === false
+      ? null
+      : options.sharpen === true
+        ? [null, null, null]
+        : [options.sharpen.sigma ?? null, options.sharpen.m1 ?? null, options.sharpen.m2 ?? null];
+
+  const trim =
+    options.trim === undefined || options.trim === false
+      ? null
+      : options.trim === true
+        ? [null, null]
+        : [options.trim.background ?? null, options.trim.threshold ?? null];
+
+  const extend =
+    options.extend === undefined
+      ? null
+      : [
+          options.extend.top ?? null,
+          options.extend.bottom ?? null,
+          options.extend.left ?? null,
+          options.extend.right ?? null,
+          options.extend.background ?? null,
+        ];
+
+  // PNG ignores quality, so it must not split the cache key for that format.
+  const quality = options.format === 'png' ? null : (options.quality ?? DEFAULT_QUALITY);
 
   return JSON.stringify([
     options.width ?? null,
@@ -32,6 +69,16 @@ function canonicalize(options: TransformInput): string {
     options.sepia === true ? true : null,
     options.format ?? null,
     watermark,
+    modulate,
+    options.blur ?? null,
+    sharpen,
+    options.flip === true ? true : null,
+    options.flop === true ? true : null,
+    trim,
+    extend,
+    options.background ?? null,
+    quality,
+    options.flatten === true ? true : null,
   ]);
 }
 
