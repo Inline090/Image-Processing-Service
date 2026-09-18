@@ -52,6 +52,7 @@ export async function findJobByIdForUser(id: string, userId: string): Promise<Jo
 export type JobResult = {
   processedKey: string;
   format: string;
+  mimeType: string;
   width: number;
   height: number;
 };
@@ -83,9 +84,9 @@ export async function markJobReady(id: string, result: JobResult): Promise<void>
     );
     await client.query(
       `UPDATE images
-       SET processed_key = $2, status = 'ready'
+       SET processed_key = $2, processed_mime_type = $3, status = 'ready'
        WHERE id = (SELECT image_id FROM jobs WHERE id = $1)`,
-      [id, result.processedKey],
+      [id, result.processedKey, result.mimeType],
     );
     await client.query('COMMIT');
   } catch (err) {

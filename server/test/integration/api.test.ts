@@ -7,6 +7,7 @@ import { pool } from '../../src/db/pool.js';
 const runId = Date.now();
 const emailA = `test-a-${runId}@example.com`;
 const emailB = `test-b-${runId}@example.com`;
+const emailC = `test-c-${runId}@example.com`;
 const password = 'hunter2hunter2';
 
 let server: Server;
@@ -76,7 +77,7 @@ before(async () => {
 
 after(async () => {
   try {
-    await pool.query('DELETE FROM users WHERE email = ANY($1)', [[emailA, emailB]]);
+    await pool.query('DELETE FROM users WHERE email = ANY($1)', [[emailA, emailB, emailC]]);
   } finally {
     await new Promise((resolve) => {
       server.close(resolve);
@@ -93,6 +94,17 @@ describe('auth', () => {
     );
 
     assert.equal(response.status, 201);
+  });
+
+  it('rejects a second registration for the same email', async () => {
+    const response = await fetch(
+      `${baseUrl}/api/auth/register`,
+      jsonRequest({ email: emailA, password }),
+    );
+    const body = (await response.json()) as { error: { message: string } };
+
+    assert.equal(response.status, 409);
+    assert.equal(body.error.message, 'An account with that email already exists');
   });
 
   it('rejects a password under eight characters', async () => {
@@ -215,5 +227,91 @@ describe('image listing', () => {
     const response = await fetch(`${baseUrl}/api/images?limit=500`, authed(tokenA));
 
     assert.equal(response.status, 400);
+  });
+});
+
+describe('downloads', () => {
+  let token = '';
+  let originalId = '';
+  let processedId = '';
+
+  before(async () => {
+    token = await registerAndLogin(emailC);
+    const userId = await findUserId(emailC);
+
+    const original = await pool.query<{ id: string }>(
+      `INSERT INTO images (user_id, original_key, mime_type, size_bytes, original_filename)
+       VALUES ($1, $2, 'image/jpeg', 2048, 'holiday photo.jpg')
+       RETURNING id`,
+      [userId, `test/${userId}/original`],
+    );
+
+    // Signed URLs are produced locally, so these rows never need real objects.
+    const processed = await pool.query<{ id: string }>(
+      `INSERT INTO images (user_id, original_key, mime_type, size_bytes, original_filename,
+                           processed_key, processed_mime_type, status)
+       VALUES ($1, $2, 'image/png', 2048, 'logo.png', $3, 'image/webp', 'ready')
+       RETURNING id`,
+      [userId, `test/${userId}/original-2`, `test/${userId}/processed-2`],
+    );
+
+    originalId = original.rows[0]?.id ?? '';
+    processedId = processed.rows[0]?.id ?? '';
+  });
+
+  it('rejects an unauthenticated request', async () => {
+    const response = await fetch(`${baseUrl}/api/images/${originalId}/download`);
+
+    assert.equal(response.status, 401);
+  });
+
+  it('signs a url that saves the original under its own name', async () => {
+    const response = await fetch(`${baseUrl}/api/images/${originalId}/download`, authed(token));
+    const body = (await response.json()) as { download: { url: string; filename: string } };
+    const decoded = decodeURIComponent(body.download.url).replace(/\+/g, ' ');
+
+    assert.equal(response.status, 200);
+    assert.equal(body.download.filename, 'holiday photo.jpg');
+    assert.ok(body.download.url.includes('response-content-disposition='));
+    assert.ok(decoded.includes('attachment; filename="holiday photo.jpg"'));
+  });
+
+  it('renames a processed result to the format it was encoded as', async () => {
+    const response = await fetch(
+      `${baseUrl}/api/images/${processedId}/download?variant=processed`,
+      authed(token),
+    );
+    const body = (await response.json()) as { download: { filename: string } };
+
+    assert.equal(response.status, 200);
+    assert.equal(body.download.filename, 'logo.webp');
+  });
+
+  it('refuses a processed download before there is a result', async () => {
+    const response = await fetch(
+      `${baseUrl}/api/images/${originalId}/download?variant=processed`,
+      authed(token),
+    );
+
+    assert.equal(response.status, 404);
+  });
+
+  it('rejects an unknown variant', async () => {
+    const response = await fetch(
+      `${baseUrl}/api/images/${originalId}/download?variant=enormous`,
+      authed(token),
+    );
+
+    assert.equal(response.status, 400);
+  });
+
+  it('hides an image that belongs to somebody else', async () => {
+    const otherToken = await registerAndLogin(emailA);
+    const response = await fetch(
+      `${baseUrl}/api/images/${originalId}/download`,
+      authed(otherToken),
+    );
+
+    assert.equal(response.status, 404);
   });
 });

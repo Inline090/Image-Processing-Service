@@ -15,6 +15,8 @@ export type ImageRow = {
   original_key: string;
   processed_key: string | null;
   mime_type: string;
+  processed_mime_type: string | null;
+  original_filename: string | null;
   size_bytes: string;
   width: number | null;
   height: number | null;

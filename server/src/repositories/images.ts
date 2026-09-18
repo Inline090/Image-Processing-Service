@@ -6,6 +6,7 @@ export type NewImage = {
   originalKey: string;
   mimeType: string;
   sizeBytes: number;
+  originalFilename: string | null;
 };
 
 export async function createImage({
@@ -13,12 +14,13 @@ export async function createImage({
   originalKey,
   mimeType,
   sizeBytes,
+  originalFilename,
 }: NewImage): Promise<ImageRow> {
   const { rows } = await pool.query<ImageRow>(
-    `INSERT INTO images (user_id, original_key, mime_type, size_bytes)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO images (user_id, original_key, mime_type, size_bytes, original_filename)
+     VALUES ($1, $2, $3, $4, $5)
      RETURNING *`,
-    [userId, originalKey, mimeType, sizeBytes],
+    [userId, originalKey, mimeType, sizeBytes, originalFilename],
   );
 
   const image = rows[0];

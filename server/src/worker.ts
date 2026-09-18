@@ -35,11 +35,13 @@ async function processJob(message: TransformJobMessage): Promise<void> {
   const result = await transformImage(original, message.options);
 
   const processedKey = `processed/${image.user_id}/${randomUUID()}`;
-  await putObject(processedKey, result.buffer, `image/${result.format}`);
+  const mimeType = `image/${result.format}`;
+  await putObject(processedKey, result.buffer, mimeType);
 
   await markJobReady(message.jobId, {
     processedKey,
     format: result.format,
+    mimeType,
     width: result.width,
     height: result.height,
   });

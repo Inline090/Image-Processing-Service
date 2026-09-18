@@ -12,9 +12,10 @@ import {
   listImagesForUser,
 } from '../repositories/images.js';
 import { createJob, findReadyJob } from '../repositories/jobs.js';
-import { listImagesQuerySchema } from '../schemas/image.schema.js';
+import { downloadQuerySchema, listImagesQuerySchema } from '../schemas/image.schema.js';
 import type { TransformInput } from '../schemas/transform.schema.js';
-import { putObject, signedUrl } from '../storage/s3.js';
+import { downloadFilename } from '../storage/filename.js';
+import { putObject, signedDownloadUrl, signedUrl } from '../storage/s3.js';
 
 async function serializeImage(image: ImageRow) {
   return {
@@ -47,6 +48,7 @@ export async function uploadImage(req: Request, res: Response): Promise<void> {
     originalKey: key,
     mimeType: file.mimetype,
     sizeBytes: file.size,
+    originalFilename: file.originalname,
   });
 
   res.status(201).json({ image: await serializeImage(image) });
@@ -156,4 +158,39 @@ export async function getImage(req: Request, res: Response): Promise<void> {
   }
 
   res.json({ image: await serializeImage(image) });
+}
+
+export async function downloadImage(req: Request, res: Response): Promise<void> {
+  const authUser = req.user;
+  if (authUser === undefined) {
+    throw new AppError('Not authenticated', 401);
+  }
+
+  const imageId = req.params.id;
+  if (typeof imageId !== 'string') {
+    throw new AppError('Image id is required', 400);
+  }
+
+  const parsed = downloadQuerySchema.safeParse(req.query);
+
+  if (!parsed.success) {
+    throw new AppError(`Invalid query parameters - ${formatIssues(parsed.error)}`, 400);
+  }
+
+  const image = await findImageByIdForUser(imageId, authUser.sub);
+  if (image === null) {
+    throw new AppError('Image not found', 404);
+  }
+
+  const processed = parsed.data.variant === 'processed';
+  const key = processed ? image.processed_key : image.original_key;
+
+  if (key === null) {
+    throw new AppError('This image has no processed result yet', 404);
+  }
+
+  const mimeType = processed ? (image.processed_mime_type ?? image.mime_type) : image.mime_type;
+  const filename = downloadFilename(image.original_filename, image.id, mimeType);
+
+  res.json({ download: { url: await signedDownloadUrl(key, filename), filename } });
 }

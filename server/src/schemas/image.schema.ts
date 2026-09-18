@@ -6,3 +6,9 @@ export const listImagesQuerySchema = z.object({
 });
 
 export type ListImagesQuery = z.infer<typeof listImagesQuerySchema>;
+
+export const downloadQuerySchema = z.object({
+  variant: z.enum(['original', 'processed']).default('original'),
+});
+
+export type DownloadQuery = z.infer<typeof downloadQuerySchema>;
