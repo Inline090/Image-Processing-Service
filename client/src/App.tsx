@@ -9,7 +9,7 @@ import {
   type Account,
 } from './api';
 import logo from './assets/logo.png';
-import { AuthPanel, type AuthMode } from './components/AuthPanel';
+import { AuthPanel } from './components/AuthPanel';
 import { GalleryPanel } from './components/GalleryPanel';
 import { JobStatus } from './components/JobStatus';
 import { UploadPanel } from './components/UploadPanel';
@@ -19,7 +19,6 @@ export default function App() {
   const [signedIn, setSignedIn] = useState(hasToken());
   const [expired, setExpired] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [account, setAccount] = useState<Account | null>(null);
   // Raised when a transform finishes, so the history can re-fetch and show it.
   const [historyRefresh, setHistoryRefresh] = useState(0);
@@ -89,7 +88,6 @@ export default function App() {
   // is the way back to the sign-in card, not a sign-out.
   function leaveGuestMode(): void {
     signOut();
-    setAuthMode('login');
   }
 
   const isGuest = account !== null && account.guest;
@@ -114,9 +112,7 @@ export default function App() {
             {expired && <p className="notice">Your session expired - please sign in again.</p>}
 
             <AuthPanel
-              mode={authMode}
               guestExhausted={guestExhausted}
-              onModeChange={setAuthMode}
               onSignedIn={() => {
                 setSignedIn(true);
                 setExpired(false);
@@ -146,7 +142,7 @@ export default function App() {
             <Button
               variant="ghost"
               onClick={leaveGuestMode}
-              title="Leave the guest session and sign in or register."
+              title="Leave the guest session and sign in with an account."
             >
               Sign in
             </Button>

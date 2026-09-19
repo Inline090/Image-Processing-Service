@@ -1,46 +1,44 @@
-import { useState, type FormEvent } from 'react';
-import { login, register, signInAsGuest } from '../api';
+import { useState } from 'react';
+import { siFacebook, siGoogle, siX, type SimpleIcon } from 'simple-icons';
+import {
+  authRedirectError,
+  clearAuthRedirectError,
+  providerSignInUrl,
+  signInAsGuest,
+  type SignInProvider,
+} from '../api';
 import { Button } from './ui/Button';
-import { Field } from './ui/Field';
 import { Panel } from './ui/Panel';
 
-export type AuthMode = 'login' | 'register';
+// The real brand marks, from the icon set rather than drawn by hand. They are single
+// paths, so they take the button's own colour: three different logos would otherwise
+// fight the one accent this interface uses.
+const PROVIDERS: Array<{ id: SignInProvider; label: string; icon: SimpleIcon }> = [
+  { id: 'google', label: 'Google', icon: siGoogle },
+  { id: 'facebook', label: 'Facebook', icon: siFacebook },
+  // X is the current mark for the same provider; the bird is no longer published.
+  { id: 'twitter', label: 'Twitter', icon: siX },
+];
 
 type Props = {
-  mode: AuthMode;
   /** True once this browser has spent the guest allowance. */
   guestExhausted: boolean;
-  onModeChange: (mode: AuthMode) => void;
   onSignedIn: () => void;
 };
 
-export function AuthPanel({ mode, guestExhausted, onModeChange, onSignedIn }: Props) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
+export function AuthPanel({ guestExhausted, onSignedIn }: Props) {
+  // A failed provider sign-in is reported back through the address bar, and this is the
+  // screen that should say so.
+  const [error, setError] = useState<string | null>(authRedirectError());
   const [busy, setBusy] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
+  function clearError(): void {
+    clearAuthRedirectError();
     setError(null);
-    setBusy(true);
-
-    try {
-      if (mode === 'register') {
-        await register(email, password);
-      }
-
-      await login(email, password);
-      onSignedIn();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function handleGuest(): Promise<void> {
-    setError(null);
+    clearError();
     setBusy(true);
 
     try {
@@ -53,89 +51,47 @@ export function AuthPanel({ mode, guestExhausted, onModeChange, onSignedIn }: Pr
     }
   }
 
-  function toggleMode(): void {
-    onModeChange(mode === 'login' ? 'register' : 'login');
-    setEmail('');
-    setPassword('');
-    setError(null);
-  }
-
   return (
-    <Panel
-      title={mode === 'login' ? 'Sign in' : 'Create an account'}
-      lede={
-        mode === 'login'
-          ? 'Enter your details to continue.'
-          : 'Choose an email and a password of at least eight characters.'
-      }
-    >
-      <form onSubmit={handleSubmit}>
-        <div className="group">
-          <Field label="Email" hideLabel>
-            <input
-              type="email"
-              placeholder="Enter email"
-              title="The email address on your account."
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-            />
-          </Field>
+    <Panel title="Sign in" lede="Choose an account to continue, or carry on as a guest.">
+      {error !== null && <p className="notice">{error}</p>}
 
-          <Field label="Password" hideLabel>
-            <input
-              type="password"
-              placeholder="Password"
-              title="Your password. At least eight characters."
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              minLength={8}
-              required
-            />
-          </Field>
-        </div>
+      <div className="auth-providers">
+        {PROVIDERS.map((provider) => (
+          <Button
+            key={provider.id}
+            variant="outline"
+            disabled={busy}
+            title={`Sign in with your ${provider.label} account. No password to remember, and the account is real.`}
+            onClick={() => {
+              window.location.href = providerSignInUrl(provider.id);
+            }}
+          >
+            {/* Decorative: the label beside it carries the name. */}
+            <svg className="brand-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d={provider.icon.path} />
+            </svg>
+            {provider.label}
+          </Button>
+        ))}
+      </div>
 
-        {error !== null && <p className="notice">{error}</p>}
-
-        <Button
-          type="submit"
-          variant="primary"
-          disabled={busy}
-          title={mode === 'login' ? 'Sign in to your account.' : 'Create the account and sign in.'}
-        >
-          {busy ? 'Working...' : mode === 'login' ? 'Sign in' : 'Sign up'}
-        </Button>
-
-        <div className="divider">Or Continue as</div>
-
-        <div className="auth-guest">
-          {guestExhausted ? (
-            <p className="auth-alt">
-              Guest uploads are used up on this browser. Create an account to keep going.
-            </p>
-          ) : (
-            <Button
-              variant="link"
-              disabled={busy}
-              title="Start a temporary session. It allows a set number of uploads, once."
-              onClick={() => void handleGuest()}
-            >
-              Guest
-            </Button>
-          )}
-        </div>
-
-        <p className="auth-alt">
-          {mode === 'login' ? "Don't have an account? " : 'Already registered? '}
+      <div className="auth-guest">
+        {guestExhausted ? (
+          <p className="auth-alt">
+            Guest uploads are used up on this browser. Sign in with one of the accounts above to
+            keep going.
+          </p>
+        ) : (
           <Button
             variant="link"
-            title={mode === 'login' ? 'Create an account instead.' : 'Sign in instead.'}
-            onClick={toggleMode}
+            disabled={busy}
+            title="Start a temporary session. It allows a set number of uploads, once."
+            onClick={() => void handleGuest()}
           >
-            {mode === 'login' ? 'Register' : 'Sign in'}
+            or continue as guest
           </Button>
-        </p>
-      </form>
+        )}
+      </div>
     </Panel>
   );
 }

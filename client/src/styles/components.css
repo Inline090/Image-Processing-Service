@@ -163,28 +163,30 @@
   text-align: center;
 }
 
-/* A rule either side of the label, rather than the literal dashes the reference
-   draws — same effect, and it stays centred at any width. */
-.divider {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  font-size: var(--text-label);
-  color: var(--muted-foreground);
-}
-
-.divider::before,
-.divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--border);
-}
-
-/* Wraps the guest link so its hit area stays the width of the word. */
+/* Wraps the guest link so its hit area stays the width of the word. Set apart from the
+   buttons above it by more than they are from each other: it is the other choice, not a
+   fourth way in. */
 .auth-guest {
   display: flex;
   justify-content: center;
+  margin-top: var(--space-5);
+}
+
+/* Stacked, not side by side: an icon plus a label makes three of these wider than the
+   card, and wrapping left one button stranded on its own row. Full width also gives
+   each of them a proper hit area. */
+.auth-providers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* A brand mark on a button: takes the button's own colour, and never squashes. */
+.brand-icon {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
 }
 
 /* Shown beside sign-out for guest sessions. */

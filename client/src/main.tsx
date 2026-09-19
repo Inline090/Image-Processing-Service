@@ -9,6 +9,11 @@ import '@fontsource/poppins/latin-700.css';
 import '@fontsource-variable/dm-sans';
 import './index.css';
 import App from './App.tsx';
+import { consumeAuthRedirect } from './api.ts';
+
+// Before the first render: a provider sign-in arrives as a token in the address bar,
+// and the app decides whether it is signed in as it mounts.
+consumeAuthRedirect();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

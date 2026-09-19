@@ -64,6 +64,7 @@ function round(value: number, places: number): number {
 // and Reset puts them all back, so the two cannot drift apart.
 const DEFAULTS = {
   crop: false,
+  keep: 100,
   width: '400',
   height: '',
   focus: 'center' as CropFocus,
@@ -96,6 +97,10 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [crop, setCrop] = useState(DEFAULTS.crop);
+  const [keep, setKeep] = useState(DEFAULTS.keep);
+  // Measured from the picked file, because a percentage has to become pixels before it
+  // can be sent: the crop is taken from the original, and only the browser knows its size.
+  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
   const [width, setWidth] = useState(DEFAULTS.width);
   const [height, setHeight] = useState(DEFAULTS.height);
   const [focus, setFocus] = useState<CropFocus>(DEFAULTS.focus);
@@ -130,6 +135,7 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
   // the notice about the history are not settings, so they are left alone.
   function resetSettings(): void {
     setCrop(DEFAULTS.crop);
+    setKeep(DEFAULTS.keep);
     setWidth(DEFAULTS.width);
     setHeight(DEFAULTS.height);
     setFocus(DEFAULTS.focus);
@@ -168,10 +174,26 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
 
   function clearPickedFile(): void {
     setFile(null);
+    setImageSize(null);
     releasePreview();
 
     if (fileInput.current !== null) {
       fileInput.current.value = '';
+    }
+  }
+
+  // createImageBitmap applies the file's own orientation, which is what sharp does when
+  // it reads the image too, so a percentage lines up with what the worker will crop.
+  async function measureImage(picked: File): Promise<void> {
+    try {
+      const bitmap = await createImageBitmap(picked);
+
+      setImageSize({ width: bitmap.width, height: bitmap.height });
+      bitmap.close();
+    } catch {
+      // The size could not be read, so a percentage cannot be worked out. The control
+      // is simply not offered, and the crop is left out.
+      setImageSize(null);
     }
   }
 
@@ -182,9 +204,11 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
     setFile(picked);
     setJob(null);
     setNotKept(false);
+    setImageSize(null);
 
     if (picked !== null) {
       setPreview(URL.createObjectURL(picked));
+      void measureImage(picked);
     }
   }
 
@@ -197,6 +221,20 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
     }
 
     if (crop) {
+      // The middle `keep` percent of the image, as an equal inset on all four sides.
+      // Worked out here because the API takes a region in pixels.
+      if (keep < 100 && imageSize !== null) {
+        const insetX = Math.round((imageSize.width * (100 - keep)) / 200);
+        const insetY = Math.round((imageSize.height * (100 - keep)) / 200);
+
+        options.crop = {
+          left: insetX,
+          top: insetY,
+          width: Math.max(1, imageSize.width - insetX * 2),
+          height: Math.max(1, imageSize.height - insetY * 2),
+        };
+      }
+
       const parsedWidth = parseNumber(width, 1, 4096);
       if (parsedWidth !== undefined) {
         options.width = Math.round(parsedWidth);
@@ -375,6 +413,19 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
               />
               Crop
             </label>
+
+            {crop && imageSize !== null && (
+              <Slider
+                label="Keep"
+                tooltip="Crops to the middle of the image. 100% keeps all of it, 50% keeps the middle half."
+                min={10}
+                max={100}
+                step={1}
+                value={keep}
+                onChange={setKeep}
+                format={(value) => `${Math.round(value)}%`}
+              />
+            )}
 
             <div className="pairs">
               {crop && (

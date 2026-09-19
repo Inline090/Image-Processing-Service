@@ -1,4 +1,9 @@
-const BASE = '/api';
+// The dev server proxies /api, and a same-origin deployment serves it from the same
+// place, so the default is a relative path. When the client lives on its own host it
+// names the api with VITE_API_URL, which Vite bakes in at build time.
+const API_ORIGIN = import.meta.env.VITE_API_URL ?? '';
+
+const BASE = `${API_ORIGIN}/api`;
 
 export type Image = {
   id: string;
@@ -110,6 +115,53 @@ export function markGuestExhausted(): void {
   localStorage.setItem(GUEST_EXHAUSTED_KEY, '1');
 }
 
+let authRedirectMessage: string | null = null;
+
+/**
+ * A provider sign-in lands back on this page with its answer in the fragment: a token
+ * when it worked, or a message when it did not. Called once at startup, before the app
+ * decides whether it is signed in.
+ *
+ * The fragment is wiped either way - a token left in the address bar is a token in
+ * the browser's history - and the message is left for the sign-in screen to show.
+ */
+export function consumeAuthRedirect(): void {
+  const hash = window.location.hash.slice(1);
+  const separator = hash.indexOf('=');
+
+  if (separator === -1) {
+    return;
+  }
+
+  const key = hash.slice(0, separator);
+  const value = decodeURIComponent(hash.slice(separator + 1));
+
+  window.history.replaceState(null, '', window.location.pathname + window.location.search);
+
+  if (key === 'token') {
+    setToken(value);
+  } else if (key === 'error') {
+    authRedirectMessage = value;
+  }
+}
+
+// Read without clearing, so a second render in development still sees the message.
+// The sign-in screen clears it once the person does something.
+export function authRedirectError(): string | null {
+  return authRedirectMessage;
+}
+
+export function clearAuthRedirectError(): void {
+  authRedirectMessage = null;
+}
+
+/** Where the browser goes to sign in with a provider. A page navigation, not a request. */
+export type SignInProvider = 'google' | 'facebook' | 'twitter';
+
+export function providerSignInUrl(provider: SignInProvider): string {
+  return `${BASE}/auth/${provider}`;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
 
@@ -117,7 +169,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const response = await fetch(`${BASE}${path}`, { ...init, headers });
+  let response: Response;
+
+  try {
+    response = await fetch(`${BASE}${path}`, { ...init, headers });
+  } catch {
+    // fetch only rejects when the request never arrived at all, so the wording
+    // below would be wrong: there is no status to report.
+    throw new Error('Could not reach the server. Check your connection and try again.');
+  }
 
   if (response.status === 401 && !path.startsWith('/auth/')) {
     setToken(null);
@@ -129,28 +189,18 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       error?: { message?: string };
     } | null;
 
-    throw new Error(body?.error?.message ?? `Request failed with status ${response.status}`);
+    throw new Error(body?.error?.message ?? unhelpfulStatus(response.status));
   }
 
   return (await response.json()) as T;
 }
 
-export function register(email: string, password: string): Promise<unknown> {
-  return request('/auth/register', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-}
-
-export async function login(email: string, password: string): Promise<void> {
-  const result = await request<{ token: string }>('/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-
-  setToken(result.token);
+// Reached when the reply did not come from this API - a gateway or proxy page, or
+// a crash before the handler ran - so the caller gets plain words, not a number.
+function unhelpfulStatus(status: number): string {
+  return status >= 500
+    ? 'The service is having trouble right now. Please try again in a moment.'
+    : `That request could not be completed (status ${status}).`;
 }
 
 export async function uploadImage(file: File): Promise<Image> {
