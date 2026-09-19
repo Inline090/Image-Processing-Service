@@ -36,7 +36,7 @@ function explain(err: unknown): string {
   const codes = collectCodes(err);
 
   if (codes.includes('ECONNREFUSED')) {
-    return `nothing is listening on ${describeTarget()} — start the database with: docker start ips-postgres`;
+    return `nothing is listening on ${describeTarget()} - is PostgreSQL running there?`;
   }
   if (codes.includes('28P01')) {
     return 'PostgreSQL rejected the credentials in DATABASE_URL';

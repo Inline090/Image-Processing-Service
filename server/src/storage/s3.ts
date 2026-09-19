@@ -8,10 +8,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config.js';
 import { contentDisposition } from './filename.js';
 
-export const s3 = new S3Client({
-  region: config.awsRegion,
-  ...(config.s3Endpoint === '' ? {} : { endpoint: config.s3Endpoint, forcePathStyle: true }),
-});
+export const s3 = new S3Client({ region: config.awsRegion });
 
 export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
   await s3.send(

@@ -32,6 +32,12 @@ function effortIsAllowed(options: { format?: string; effort?: number }): boolean
   return options.format === 'webp' || options.format === 'avif';
 }
 
+// A crop is taken out of the original, before any resizing, so its bound is the size of
+// the decoded image rather than an output size. That is already held down by
+// MAX_INPUT_PIXELS, so this only has to be large enough not to refuse a big photograph:
+// 4096 would reject the middle of anything over 4 megapixels.
+const MAX_CROP_EDGE = 20000;
+
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Expected a hex colour such as #ffffff');
 
 const modulateSchema = z
@@ -77,10 +83,10 @@ export const transformSchema = z
     rotate: z.number().int().optional(),
     crop: z
       .object({
-        left: z.number().int().min(0),
-        top: z.number().int().min(0),
-        width: z.number().int().positive().max(4096),
-        height: z.number().int().positive().max(4096),
+        left: z.number().int().min(0).max(MAX_CROP_EDGE),
+        top: z.number().int().min(0).max(MAX_CROP_EDGE),
+        width: z.number().int().positive().max(MAX_CROP_EDGE),
+        height: z.number().int().positive().max(MAX_CROP_EDGE),
       })
       .strict()
       .optional(),

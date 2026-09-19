@@ -11,10 +11,7 @@ import {
 import { config } from '../config.js';
 import type { TransformInput } from '../schemas/transform.schema.js';
 
-export const sqs = new SQSClient({
-  region: config.awsRegion,
-  ...(config.sqsEndpoint === '' ? {} : { endpoint: config.sqsEndpoint }),
-});
+export const sqs = new SQSClient({ region: config.awsRegion });
 
 const QUEUE_NAME = 'transformations';
 const DEAD_LETTER_QUEUE_NAME = 'transformations-dlq';
@@ -38,9 +35,7 @@ export type ReceivedJob = {
 let queueReady: Promise<string> | null = null;
 
 async function queueUrl(name: string): Promise<string> {
-  const found = await sqs
-    .send(new GetQueueUrlCommand({ QueueName: name }))
-    .catch(() => null);
+  const found = await sqs.send(new GetQueueUrlCommand({ QueueName: name })).catch(() => null);
 
   if (found?.QueueUrl !== undefined) {
     return found.QueueUrl;

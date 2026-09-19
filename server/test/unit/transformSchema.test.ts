@@ -41,4 +41,14 @@ describe('transform schema', () => {
     assert.equal(accepts({ width: 100, focus: 'entropy' }), true);
     assert.equal(accepts({ width: 100, focus: 'faces' }), false);
   });
+
+  it('allows a crop taken from a large photograph', () => {
+    // The crop comes out of the original, so its bound has to clear a modern camera
+    // rather than the output cap the resize fields use.
+    assert.equal(accepts({ crop: { left: 400, top: 300, width: 7200, height: 4800 } }), true);
+
+    // Still bounded, and still whole pixels.
+    assert.equal(accepts({ crop: { left: 0, top: 0, width: 40000, height: 10 } }), false);
+    assert.equal(accepts({ crop: { left: 0, top: 0, width: 10.5, height: 10 } }), false);
+  });
 });

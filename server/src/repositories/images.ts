@@ -112,19 +112,3 @@ export async function deleteSettledEphemeralForUser(
 
   return rows;
 }
-
-export async function markImageReady(id: string, processedKey: string): Promise<ImageRow> {
-  const { rows } = await pool.query<ImageRow>(
-    `UPDATE images
-     SET processed_key = $2, status = 'ready'
-     WHERE id = $1
-     RETURNING *`,
-    [id, processedKey],
-  );
-
-  const image = rows[0];
-  if (image === undefined) {
-    throw new Error('Update returned no row');
-  }
-  return image;
-}

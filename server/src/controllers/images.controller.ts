@@ -105,7 +105,7 @@ function serializeJob(job: JobRow) {
     status: job.status,
     attempts: job.attempts,
     error: job.error,
-    processedKey: job.processed_key,
+    // The object key stays server-side: the client only ever needs a signed url.
     format: job.format,
     width: job.width,
     height: job.height,

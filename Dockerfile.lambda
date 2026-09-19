@@ -1,0 +1,51 @@
+# The worker as a Lambda container image.
+#
+# The API and the worker share this codebase but are deployed differently: the API is a
+# long-running process that listens on a port, while the worker is invoked once per batch
+# of queue messages. Lambda runs whatever the image tells it to, so this image sits on the
+# Lambda Node base - which supplies the runtime interface client that turns an invocation
+# into a call on an exported handler - and points at the queue handler rather than at a
+# server entry point.
+#
+# Build from the repository root, because the install is a workspace install:
+#
+#   docker build -f Dockerfile.lambda -t image-processing-worker .
+
+FROM node:22-slim AS build
+WORKDIR /app
+
+# Only the manifests first, so a code change does not reinstall everything.
+COPY package.json package-lock.json ./
+COPY server/package.json server/
+COPY client/package.json client/
+
+# The compiler is a dev package, so this stage installs everything. --ignore-scripts skips
+# the root `prepare` hook, which runs husky and has no .git to work with in an image.
+RUN npm ci --ignore-scripts
+
+COPY server ./server
+RUN npm run build --workspace=server
+
+# The Lambda base image supplies the runtime interface client. A plain node image would
+# start a process and exit, because nothing would be listening for invocations.
+FROM public.ecr.aws/lambda/nodejs:22
+
+# The runtime looks for the handler under the task root, so the app is laid out beneath it.
+WORKDIR ${LAMBDA_TASK_ROOT}
+
+COPY package.json package-lock.json ./
+COPY server/package.json server/
+COPY client/package.json client/
+
+# The install has to happen here rather than being copied from a developer machine: sharp
+# ships a native binary per platform, and this image's platform is the one that matters.
+# Nothing builds at runtime and the logger only reaches for its pretty printer outside
+# production, so the dev packages are left out. See the note above on scripts.
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+
+COPY --from=build /app/server/dist ./server/dist
+
+ENV NODE_ENV=production
+
+# server/dist/lambda/workerHandler.js exports `handler`.
+CMD ["server/dist/lambda/workerHandler.handler"]

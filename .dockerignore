@@ -1,0 +1,12 @@
+# Keep the build context to source only: the image installs its own dependencies and
+# builds its own output, so anything generated locally must not be copied in.
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+.git
+.github
+Icons
+*.md
+client/public
