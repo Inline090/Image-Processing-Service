@@ -12,6 +12,26 @@ const watermarkPositions = [
   'southeast',
 ] as const;
 
+const formats = ['jpeg', 'png', 'webp', 'avif'] as const;
+
+// What a resize keeps when it has to discard part of the image. `center` is the
+// plain centre crop; the other two scan the image for the region worth keeping.
+const focusValues = ['center', 'attention', 'entropy'] as const;
+
+// Effort is the encoder's own knob, and only the lossy modern formats take one:
+// WebP stops at 6 and AVIF at 9, so 6 is the ceiling both accept. JPEG and PNG
+// have no such knob, and accepting a value there would mean quietly ignoring
+// something the caller asked for.
+const MAX_EFFORT = 6;
+
+function effortIsAllowed(options: { format?: string; effort?: number }): boolean {
+  if (options.effort === undefined) {
+    return true;
+  }
+
+  return options.format === 'webp' || options.format === 'avif';
+}
+
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Expected a hex colour such as #ffffff');
 
 const modulateSchema = z
@@ -53,6 +73,7 @@ export const transformSchema = z
     width: z.number().int().positive().max(4096).optional(),
     height: z.number().int().positive().max(4096).optional(),
     fit: z.enum(['cover', 'contain', 'fill', 'inside', 'outside']).optional(),
+    focus: z.enum(focusValues).optional(),
     rotate: z.number().int().optional(),
     crop: z
       .object({
@@ -65,7 +86,7 @@ export const transformSchema = z
       .optional(),
     grayscale: z.boolean().optional(),
     sepia: z.boolean().optional(),
-    format: z.enum(['jpeg', 'png', 'webp']).optional(),
+    format: z.enum(formats).optional(),
     watermark: z
       .object({
         text: z.string().min(1).max(64),
@@ -83,7 +104,12 @@ export const transformSchema = z
     background: hexColor.optional(),
     flatten: z.boolean().optional(),
     quality: z.number().int().min(1).max(100).optional(),
+    effort: z.number().int().min(0).max(MAX_EFFORT).optional(),
   })
-  .strict();
+  .strict()
+  .refine(effortIsAllowed, {
+    path: ['effort'],
+    message: 'effort only applies to webp and avif, so set the format alongside it',
+  });
 
 export type TransformInput = z.infer<typeof transformSchema>;

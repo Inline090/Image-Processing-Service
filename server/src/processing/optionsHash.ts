@@ -1,15 +1,21 @@
 import { createHash } from 'node:crypto';
 import type { TransformInput } from '../schemas/transform.schema.js';
 
-const PIPELINE_VERSION = 2;
+const PIPELINE_VERSION = 3;
 
 export const DEFAULT_FIT = 'cover';
+export const DEFAULT_FOCUS = 'center';
+export const DEFAULT_EFFORT = 4;
 export const DEFAULT_WATERMARK_POSITION = 'southeast';
 export const DEFAULT_QUALITY = 82;
 
 function canonicalize(options: TransformInput): string {
   const resizes = options.width !== undefined || options.height !== undefined;
-  const fit = resizes ? options.fit ?? DEFAULT_FIT : null;
+  const fit = resizes ? (options.fit ?? DEFAULT_FIT) : null;
+
+  // Focus is only read by a resize that has to choose a region, so it must not
+  // split the key for anything else.
+  const focus = resizes ? (options.focus ?? DEFAULT_FOCUS) : null;
 
   const crop =
     options.crop === undefined
@@ -59,10 +65,18 @@ function canonicalize(options: TransformInput): string {
   // PNG ignores quality, so it must not split the cache key for that format.
   const quality = options.format === 'png' ? null : (options.quality ?? DEFAULT_QUALITY);
 
+  // Effort belongs to the two lossy modern encoders, and 4 is the default of
+  // both, so an explicit 4 and an omitted value are the same request.
+  const effort =
+    options.format === 'webp' || options.format === 'avif'
+      ? (options.effort ?? DEFAULT_EFFORT)
+      : null;
+
   return JSON.stringify([
     options.width ?? null,
     options.height ?? null,
     fit,
+    focus,
     options.rotate ?? null,
     crop,
     options.grayscale === true ? true : null,
@@ -78,6 +92,7 @@ function canonicalize(options: TransformInput): string {
     extend,
     options.background ?? null,
     quality,
+    effort,
     options.flatten === true ? true : null,
   ]);
 }

@@ -33,6 +33,32 @@ function twoToneImage(width: number, height: number): Promise<Buffer> {
   return rawImage(width, height, pixels);
 }
 
+// A grey field with a bright block against the left edge: a centre crop misses it
+// entirely, so a strategy that scans the image has to land somewhere brighter.
+function greyWithBrightBlock(width: number, height: number): Promise<Buffer> {
+  const channels = 3;
+  const pixels = Buffer.alloc(width * height * channels, 128);
+  const block = Math.round(Math.min(width, height) * 0.2);
+
+  for (let y = 0; y < block; y += 1) {
+    for (let x = 0; x < block; x += 1) {
+      const index = (y * width + x) * channels;
+
+      pixels[index] = 255;
+      pixels[index + 1] = 255;
+      pixels[index + 2] = 255;
+    }
+  }
+
+  return rawImage(width, height, pixels);
+}
+
+async function meanBrightness(buffer: Buffer): Promise<number> {
+  const { channels } = await sharp(buffer).stats();
+
+  return channels[0]?.mean ?? 0;
+}
+
 describe('transform pipeline', () => {
   it('resizes to the requested width, preserving the aspect ratio', async () => {
     const result = await transformImage(await sourceImage(), { width: 200 });
@@ -247,6 +273,53 @@ describe('transform pipeline', () => {
     assert.ok(
       low.buffer.length < high.buffer.length,
       `expected quality 10 (${low.buffer.length} bytes) to be smaller than quality 95 (${high.buffer.length} bytes)`,
+    );
+  });
+
+  it('encodes avif and reports it as avif rather than the heif container', async () => {
+    const result = await transformImage(await sourceImage(64, 64), { format: 'avif' });
+
+    assert.equal(result.format, 'avif');
+
+    // 'ftyp' followed by the avif brand is proof the bytes really are AVIF rather
+    // than a container sharp has merely relabelled - sharp itself calls this
+    // format "heif", which is why the reported format is pinned separately.
+    assert.equal(result.buffer.subarray(4, 8).toString('ascii'), 'ftyp');
+    assert.equal(result.buffer.subarray(8, 12).toString('ascii'), 'avif');
+  });
+
+  it('passes the effort setting through to the encoder', async () => {
+    const noisy = await rawImage(128, 128, randomBytes(128 * 128 * 3));
+    const quick = await transformImage(noisy, { format: 'avif', effort: 0 });
+    const thorough = await transformImage(noisy, { format: 'avif', effort: 6 });
+
+    // Effort is not a monotonic size dial - on incompressible input a higher
+    // effort can spend more bytes - so this pins that the value reaches the
+    // encoder, not that it wins.
+    assert.notDeepEqual(quick.buffer, thorough.buffer);
+    assert.equal(thorough.width, 128);
+    assert.equal(thorough.format, 'avif');
+  });
+
+  it('keeps the busy region when asked to focus, instead of the middle', async () => {
+    const source = await greyWithBrightBlock(300, 100);
+    const sized = { width: 60, height: 60, format: 'png' } as const;
+
+    const centred = await transformImage(source, { ...sized, focus: 'center' });
+    const attention = await transformImage(source, { ...sized, focus: 'attention' });
+    const entropy = await transformImage(source, { ...sized, focus: 'entropy' });
+
+    assert.equal(centred.width, 60);
+    assert.equal(attention.width, 60);
+    assert.equal(entropy.width, 60);
+
+    assert.ok(
+      (await meanBrightness(attention.buffer)) > (await meanBrightness(centred.buffer)),
+      'attention should keep the bright region the centre crop discards',
+    );
+    assert.ok(
+      (await meanBrightness(entropy.buffer)) > (await meanBrightness(centred.buffer)),
+      'entropy should keep the bright region the centre crop discards',
     );
   });
 });

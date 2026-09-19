@@ -16,6 +16,7 @@ const discriminating: Array<[string, TransformInput]> = [
   ['width', { width: 200 }],
   ['height', { height: 200 }],
   ['fit', { width: 100, height: 100, fit: 'contain' }],
+  ['focus', { width: 100, height: 100, focus: 'attention' }],
   ['rotate', { rotate: 90 }],
   ['crop', { crop: { left: 1, top: 1, width: 10, height: 10 } }],
   ['grayscale', { grayscale: true }],
@@ -37,6 +38,7 @@ const discriminating: Array<[string, TransformInput]> = [
   ['background', { background: '#ff0000' }],
   ['flatten', { flatten: true }],
   ['quality', { quality: 40 }],
+  ['effort', { format: 'avif', effort: 6 }],
 ];
 
 describe('transform options hash', () => {
@@ -85,5 +87,23 @@ describe('transform options hash', () => {
 
   it('treats an omitted fit and the explicit default as the same entry', () => {
     assert.equal(hash({ width: 100 }), hash({ width: 100, fit: 'cover' }));
+  });
+
+  it('ignores focus when nothing is resized', () => {
+    assert.equal(hash({ format: 'png' }), hash({ format: 'png', focus: 'attention' }));
+  });
+
+  it('treats an omitted focus and the explicit centre as the same entry', () => {
+    assert.equal(hash({ width: 100 }), hash({ width: 100, focus: 'center' }));
+    assert.notEqual(hash({ width: 100 }), hash({ width: 100, focus: 'attention' }));
+  });
+
+  it('treats an explicit effort equal to the default as the same entry', () => {
+    assert.equal(hash({ format: 'avif' }), hash({ format: 'avif', effort: 4 }));
+    assert.notEqual(hash({ format: 'avif' }), hash({ format: 'avif', effort: 6 }));
+  });
+
+  it('ignores effort for a format that has no such knob', () => {
+    assert.equal(hash({ format: 'jpeg' }), hash({ format: 'jpeg', effort: 6 }));
   });
 });

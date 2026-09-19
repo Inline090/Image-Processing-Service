@@ -4,7 +4,29 @@ import { DEFAULT_FIT, DEFAULT_QUALITY, DEFAULT_WATERMARK_POSITION } from './opti
 
 const DEFAULT_FLATTEN_BACKGROUND = '#ffffff';
 
+// sharp calls the centre gravity "centre". Attention and entropy are its two
+// smart-crop strategies: each scans the image and picks the region worth keeping
+// instead of assuming the middle.
+type ResizePosition = 'centre' | 'attention' | 'entropy';
+
+function focusPosition(focus: CropFocus): ResizePosition {
+  if (focus === 'attention') {
+    return 'attention';
+  }
+
+  if (focus === 'entropy') {
+    return 'entropy';
+  }
+
+  return 'centre';
+}
+
 export type ResizeFit = 'cover' | 'contain' | 'fill' | 'inside' | 'outside';
+
+/** What a resize keeps when it has to discard part of the image. */
+export type CropFocus = 'center' | 'attention' | 'entropy';
+
+export type OutputFormat = 'jpeg' | 'png' | 'webp' | 'avif';
 
 export type WatermarkPosition =
   | 'northwest'
@@ -47,11 +69,12 @@ export type TransformOptions = {
   width?: number;
   height?: number;
   fit?: ResizeFit;
+  focus?: CropFocus;
   rotate?: number;
   crop?: { left: number; top: number; width: number; height: number };
   grayscale?: boolean;
   sepia?: boolean;
-  format?: 'jpeg' | 'png' | 'webp';
+  format?: OutputFormat;
   watermark?: { text: string; position?: WatermarkPosition };
   modulate?: ModulateOptions;
   blur?: number;
@@ -63,6 +86,7 @@ export type TransformOptions = {
   background?: string;
   flatten?: boolean;
   quality?: number;
+  effort?: number;
 };
 
 export type TransformResult = {
@@ -153,6 +177,7 @@ export async function transformImage(
       width: options.width,
       height: options.height,
       fit: options.fit ?? DEFAULT_FIT,
+      ...(options.focus === undefined ? {} : { position: focusPosition(options.focus) }),
       ...(options.background === undefined ? {} : { background: options.background }),
     });
   }
@@ -221,20 +246,32 @@ export async function transformImage(
   }
 
   const quality = options.quality ?? DEFAULT_QUALITY;
+  const effort = options.effort;
 
   if (options.format === 'jpeg') {
     pipeline = pipeline.jpeg({ quality });
   } else if (options.format === 'png') {
     pipeline = pipeline.png();
   } else if (options.format === 'webp') {
-    pipeline = pipeline.webp({ quality });
+    pipeline = pipeline.webp({ quality, ...(effort === undefined ? {} : { effort }) });
+  } else if (options.format === 'avif') {
+    // AVIF is a HEIF profile, so sharp exposes it as heif with AV1 compression
+    // rather than as a codec of its own.
+    pipeline = pipeline.heif({
+      compression: 'av1',
+      quality,
+      ...(effort === undefined ? {} : { effort }),
+    });
   }
 
   const { data, info } = await pipeline.toBuffer({ resolveWithObject: true });
 
   return {
     buffer: data,
-    format: info.format,
+    // sharp reports AVIF as "heif", which would store the wrong content type and
+    // make the download save as .bin, so the requested format wins when there is
+    // one and sharp's own report is the fallback.
+    format: options.format ?? info.format,
     width: info.width,
     height: info.height,
   };
