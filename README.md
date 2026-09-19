@@ -20,6 +20,8 @@ Failed jobs are retried instead of being dropped. The message remains in the que
 - **Retries and Dead Letters**: Failed jobs are retried, and messages that keep failing move to a dead-letter queue
 - **Private Storage**: Images are served through short-lived pre-signed URLs
 - **Downloads**: Originals and processed results download under the name they were uploaded with, through a signed URL that is forced to save as an attachment
+- **Deletion**: Removing an image deletes its row, its jobs and both stored objects; the history can also be cleared in one request
+- **Guest Sessions**: `POST /api/auth/guest` creates a throwaway account so the product can be tried without registering. Guests are capped at five uploads, checked before anything reaches storage; registered accounts are not capped. Guest creation has its own rate limiter, so anonymous uploads are bounded by accounts per IP multiplied by that cap
 - **Owner Scoping**: Users can only list, read and transform their own images
 
 ## Quick Start
@@ -55,6 +57,8 @@ cp server/.env.example server/.env
 
 - `S3_ENDPOINT` and `SQS_ENDPOINT` are set for the local containers. Leave both empty to point the same code at real AWS.
 - `MAX_INPUT_PIXELS` caps the decoded size of an upload, default 50 megapixels.
+- `GUEST_UPLOAD_LIMIT` caps how many images a guest account may upload, default 5. Set it high to make guests effectively unlimited, or to 1 to make the account a single-shot trial.
+- `HISTORY_LIMIT` caps how many images a user keeps in their history, default 12. Past the cap an upload is not refused - see [History limit](#history-limit) below.
 - `SQS_VISIBILITY_TIMEOUT` must exceed the slowest job, or a message can be picked up twice.
 
 ### 4. Create the Database Tables
@@ -129,7 +133,7 @@ client/
 
 ## Database Schema
 
-- **users**: id, email, password_hash, created_at
+- **users**: id, email, password_hash, is_guest, created_at
 - **images**: id, user_id, original_key, processed_key, mime_type, processed_mime_type, original_filename, size_bytes, width, height, status, created_at
 - **jobs**: id, image_id, user_id, options, options_hash, status, attempts, error, processed_key, width, height, format, created_at, updated_at
 - **schema_migrations**: applied migration names
@@ -143,11 +147,14 @@ Every success response is `{ resource: ... }` and every error is `{ error: { mes
 | GET    | `/api/health`               | Liveness check                                                        |
 | POST   | `/api/auth/register`        | `{ email, password }`, password min 8 characters, `409` if taken      |
 | POST   | `/api/auth/login`           | `{ email, password }`, returns a bearer token                         |
+| POST   | `/api/auth/guest`           | Creates a throwaway account and returns a token, no body required     |
 | GET    | `/api/auth/me`              | Current user, bearer token                                            |
-| POST   | `/api/images`               | Multipart, field `image`, max 10 MB                                   |
+| POST   | `/api/images`               | Multipart, field `image`, max 10 MB, capped for guest accounts        |
 | GET    | `/api/images`               | `?page=1&limit=20`, own images only, newest first                     |
 | GET    | `/api/images/:id`           | Returns `404` for someone else's image                                |
 | GET    | `/api/images/:id/download`  | `?variant=original` or `processed`, returns a pre-signed download url |
+| DELETE | `/api/images/:id`           | Deletes one image and its stored objects, `404` if it is not yours    |
+| DELETE | `/api/images`               | Deletes every image you own, and their stored objects, `{ deleted }`  |
 | POST   | `/api/images/:id/transform` | Returns `202` with a job, or `200` if that transform is cached        |
 | GET    | `/api/jobs/:id`             | Job status, for polling                                               |
 
@@ -174,6 +181,7 @@ Send any combination. Anything outside this set is rejected.
   "flatten": true,
   "format": "webp",
   "quality": 72,
+  "effort": 4,
   "watermark": { "text": "hello", "position": "southeast" }
 }
 ```
@@ -182,6 +190,7 @@ Send any combination. Anything outside this set is rejected.
 
 - `width` / `height` - up to 4096
 - `fit` - one of `cover`, `contain`, `fill`, `inside`, `outside`. Only applies to a resize
+- `focus` - one of `center`, `attention`, `entropy`. What a resize keeps when it has to discard part of the image: `attention` and `entropy` scan the image and pick the region worth keeping instead of taking the middle. Only applies to a resize
 - `rotate` - degrees. Runs before the crop
 - `crop` - `{ left, top, width, height }`, taken from the rotated image
 - `trim` - `true` to auto-crop uniform borders, or `{ background, threshold }` where `background` is a hex colour and `threshold` is 0 to 255
@@ -199,14 +208,28 @@ Send any combination. Anything outside this set is rejected.
 
 ### Output
 
-- `format` - one of `webp`, `jpeg`, `png`
-- `quality` - 1 to 100, applied to `webp` and `jpeg`, default 82. PNG is encoded losslessly, so the value is ignored for that format
+- `format` - one of `webp`, `avif`, `jpeg`, `png`
+- `quality` - 1 to 100, applied to `webp`, `avif` and `jpeg`, default 82. PNG is encoded losslessly, so the value is ignored for that format
+- `effort` - 0 to 6, applied to `webp` and `avif`, default 4. How hard the encoder works for a smaller file: higher costs more time for less size, and past 4 the returns fall away sharply. Rejected alongside a format that has no such knob
 - `watermark` - `{ text, position }`. The overlay is scaled to the output, so small thumbnails do not fail
 - `watermark.position` - one of `northwest`, `north`, `northeast`, `west`, `center`, `east`, `southwest`, `south`, `southeast`
 
 Operations run in a fixed order rather than the order of the keys: rotate, crop, trim, resize, colour, blur, sharpen, mirror, pad, flatten, watermark, encode. Sharpen therefore lands after the resize, so the downscale does not undo it.
 
 Because the cache key is derived from the options, an option that changes the output must also reach the cache key. When adding one, extend `canonicalize` in `server/src/processing/optionsHash.ts` and bump `PIPELINE_VERSION` if the pipeline order or behaviour changes.
+
+## History Limit
+
+A user keeps at most `HISTORY_LIMIT` images in their history (default 12). The cap never refuses work: past it, an upload still goes through and its transform still runs, but the result is marked _ephemeral_ rather than being stored in the history.
+
+- Ephemeral images are excluded from `GET /api/images` and do not count towards the cap.
+- They remain reachable by id, so `GET /api/images/:id/download` still works and the job panel can hand over the result.
+- Only one is kept at a time: the next upload past the cap deletes the previous one, its row _and_ its stored objects. A user therefore stores at most `HISTORY_LIMIT + 1` images, no matter how much they transform.
+- A scratch that is still being transformed is left alone, so a queued job never has its image deleted underneath it.
+- Deleting from the history frees room, and the next upload is kept normally. Already-ephemeral results are not promoted retroactively.
+- `DELETE /api/images` clears the scratch along with the history, so nothing is left that the user cannot see or remove.
+
+The listing and the count share one predicate, so the size the UI reports and the rows it shows cannot disagree.
 
 ## Available Scripts
 
