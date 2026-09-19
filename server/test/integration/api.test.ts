@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import type { Server } from 'node:http';
 import { after, before, describe, it } from 'node:test';
 import app from '../../src/app.js';
+import { config } from '../../src/config.js';
 import { pool } from '../../src/db/pool.js';
+import { signToken } from '../../src/utils/jwt.js';
 
 const runId = Date.now();
 const emailA = `test-a-${runId}@example.com`;
@@ -313,5 +315,299 @@ describe('downloads', () => {
     );
 
     assert.equal(response.status, 404);
+  });
+});
+
+describe('deleting', () => {
+  let token = '';
+  let userId = '';
+
+  before(async () => {
+    // Signing in rather than registering: the register+login pair shares one
+    // rate-limit budget with every other auth request in this file.
+    const response = await fetch(
+      `${baseUrl}/api/auth/login`,
+      jsonRequest({ email: emailC, password }),
+    );
+    const body = (await response.json()) as { token: string };
+
+    token = body.token;
+    userId = await findUserId(emailC);
+  });
+
+  async function seed(count: number): Promise<void> {
+    for (let index = 0; index < count; index += 1) {
+      await pool.query(
+        `INSERT INTO images (user_id, original_key, mime_type, size_bytes)
+         VALUES ($1, $2, 'image/png', 1000)`,
+        [userId, `test/${userId}/delete-${index}-${Math.random()}`],
+      );
+    }
+  }
+
+  it('rejects an unauthenticated request', async () => {
+    const response = await fetch(`${baseUrl}/api/images`, { method: 'DELETE' });
+
+    assert.equal(response.status, 401);
+  });
+
+  it('deletes one image and reports how many went', async () => {
+    await seed(2);
+
+    const listed = await fetch(`${baseUrl}/api/images`, authed(token));
+    const before = (await listed.json()) as { images: Array<{ id: string }>; total: number };
+
+    const response = await fetch(`${baseUrl}/api/images/${before.images[0]?.id}`, {
+      method: 'DELETE',
+      ...authed(token),
+    });
+    const body = (await response.json()) as { deleted: number };
+
+    assert.equal(response.status, 200);
+    assert.equal(body.deleted, 1);
+
+    const relisted = await fetch(`${baseUrl}/api/images`, authed(token));
+    const after = (await relisted.json()) as { total: number };
+
+    assert.equal(after.total, before.total - 1);
+  });
+
+  it('hides an image that belongs to somebody else', async () => {
+    const otherUserId = await findUserId(emailA);
+    const { rows } = await pool.query<{ id: string }>(
+      `INSERT INTO images (user_id, original_key, mime_type, size_bytes)
+       VALUES ($1, $2, 'image/png', 1000)
+       RETURNING id`,
+      [otherUserId, `test/${otherUserId}/not-yours`],
+    );
+
+    const response = await fetch(`${baseUrl}/api/images/${rows[0]?.id}`, {
+      method: 'DELETE',
+      ...authed(token),
+    });
+
+    assert.equal(response.status, 404);
+  });
+
+  it('clears the whole history', async () => {
+    const response = await fetch(`${baseUrl}/api/images`, {
+      method: 'DELETE',
+      ...authed(token),
+    });
+    const body = (await response.json()) as { deleted: number };
+
+    assert.equal(response.status, 200);
+    assert.ok(body.deleted >= 1);
+
+    const relisted = await fetch(`${baseUrl}/api/images`, authed(token));
+    const after = (await relisted.json()) as { total: number };
+
+    assert.equal(after.total, 0);
+  });
+
+  it('reports nothing deleted when the history is already empty', async () => {
+    const response = await fetch(`${baseUrl}/api/images`, {
+      method: 'DELETE',
+      ...authed(token),
+    });
+    const body = (await response.json()) as { deleted: number };
+
+    assert.equal(response.status, 200);
+    assert.equal(body.deleted, 0);
+  });
+});
+
+describe('guest sessions', () => {
+  let token = '';
+  let guestId = '';
+  let uploadLimit = 0;
+
+  before(async () => {
+    const response = await fetch(`${baseUrl}/api/auth/guest`, { method: 'POST' });
+    const body = (await response.json()) as {
+      token: string;
+      user: { id: string; guest: boolean; uploadLimit: number | null };
+    };
+
+    assert.equal(response.status, 201);
+
+    token = body.token;
+    guestId = body.user.id;
+    uploadLimit = body.user.uploadLimit ?? 0;
+  });
+
+  after(async () => {
+    // The suite's global cleanup only knows the three registered test accounts,
+    // so the guest this file created has to be removed here.
+    await pool.query('DELETE FROM users WHERE id = $1', [guestId]);
+  });
+
+  it('is issued with a cap attached', () => {
+    assert.equal(uploadLimit, 5);
+  });
+
+  it('reports itself as a guest on /me', async () => {
+    const response = await fetch(`${baseUrl}/api/auth/me`, authed(token));
+    const body = (await response.json()) as {
+      user: { guest: boolean; uploadLimit: number | null; uploadsUsed: number };
+    };
+
+    assert.equal(response.status, 200);
+    assert.equal(body.user.guest, true);
+    assert.equal(body.user.uploadLimit, 5);
+    assert.equal(body.user.uploadsUsed, 0);
+  });
+
+  it('starts with an empty history of its own', async () => {
+    const response = await fetch(`${baseUrl}/api/images`, authed(token));
+    const body = (await response.json()) as { total: number };
+
+    assert.equal(body.total, 0);
+  });
+
+  // A one-pixel PNG header: enough for the magic-byte check to accept it, so the
+  // request reaches the cap before anything is sent to storage.
+  function uploadAttempt(): Promise<Response> {
+    const png = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+      0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+      0x15, 0xc4, 0x89,
+    ]);
+
+    const form = new FormData();
+    form.append('image', new Blob([png], { type: 'image/png' }), 'over.png');
+
+    return fetch(`${baseUrl}/api/images`, {
+      method: 'POST',
+      ...authed(token),
+      body: form,
+    });
+  }
+
+  // Written straight to the column because a real upload would need storage; the
+  // cap itself is what these tests are pinning down.
+  async function spendAllowance(count: number): Promise<void> {
+    await pool.query('UPDATE users SET guest_upload_count = $2 WHERE id = $1', [guestId, count]);
+  }
+
+  it('refuses an upload once the allowance is spent, without storing anything', async () => {
+    await spendAllowance(uploadLimit);
+
+    const response = await uploadAttempt();
+
+    assert.equal(response.status, 403);
+
+    // The cap is checked before the object is written, so nothing was added.
+    const { rows } = await pool.query<{ count: number }>(
+      'SELECT count(*)::int AS count FROM images WHERE user_id = $1',
+      [guestId],
+    );
+
+    assert.equal(rows[0]?.count, 0);
+  });
+
+  it('does not refund an upload when the history is deleted', async () => {
+    await seedImages(guestId, 3);
+
+    const cleared = await fetch(`${baseUrl}/api/images`, {
+      method: 'DELETE',
+      ...authed(token),
+    });
+
+    assert.equal(cleared.status, 200);
+
+    const relisted = await fetch(`${baseUrl}/api/images`, authed(token));
+    const after = (await relisted.json()) as { total: number };
+
+    assert.equal(after.total, 0);
+
+    // The allowance is spent rather than borrowed, so an empty history does not
+    // reopen it - this is the whole point of counting uploads instead of rows.
+    const response = await uploadAttempt();
+
+    assert.equal(response.status, 403);
+  });
+
+  it('reports the spent allowance on /me', async () => {
+    const response = await fetch(`${baseUrl}/api/auth/me`, authed(token));
+    const body = (await response.json()) as { user: { uploadsUsed: number } };
+
+    assert.equal(body.user.uploadsUsed, uploadLimit);
+  });
+});
+
+describe('history limit', () => {
+  const email = `history-${runId}@example.com`;
+  let token = '';
+  let userId = '';
+  let scratchId = '';
+
+  before(async () => {
+    // Inserted directly and given a token rather than going through
+    // /auth/register: the register and login pair share one rate-limit budget
+    // with every other auth request in this file, and this block only needs a
+    // caller whose listing is empty to start with.
+    const { rows } = await pool.query<{ id: string }>(
+      'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id',
+      [email, 'not-a-real-hash'],
+    );
+
+    userId = rows[0]?.id ?? '';
+    token = signToken({ sub: userId, email });
+  });
+
+  after(async () => {
+    await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+  });
+
+  it('lists the history, and counts only that towards the total', async () => {
+    await seedImages(userId, config.historyLimit);
+
+    const listed = await fetch(`${baseUrl}/api/images?limit=100`, authed(token));
+    const body = (await listed.json()) as { images: unknown[]; total: number };
+
+    assert.equal(body.total, config.historyLimit);
+    assert.equal(body.images.length, config.historyLimit);
+  });
+
+  it('keeps a result past the cap out of the history but still reachable', async () => {
+    const { rows } = await pool.query<{ id: string }>(
+      `INSERT INTO images (user_id, original_key, mime_type, size_bytes, ephemeral)
+       VALUES ($1, $2, 'image/png', 1000, true)
+       RETURNING id`,
+      [userId, `test/${userId}/scratch`],
+    );
+
+    scratchId = rows[0]?.id ?? '';
+
+    const listed = await fetch(`${baseUrl}/api/images?limit=100`, authed(token));
+    const body = (await listed.json()) as { images: Array<{ id: string }>; total: number };
+
+    // Not part of the history, so it neither shows up nor counts towards the cap.
+    assert.equal(body.total, config.historyLimit);
+    assert.ok(!body.images.some((image) => image.id === scratchId));
+
+    // Still fetchable by id, which is what makes the result reachable without
+    // being kept: the job panel signs a url for it either way.
+    const fetched = await fetch(`${baseUrl}/api/images/${scratchId}`, authed(token));
+
+    assert.equal(fetched.status, 200);
+  });
+
+  it('clears the scratch slot along with the history', async () => {
+    const response = await fetch(`${baseUrl}/api/images`, {
+      method: 'DELETE',
+      ...authed(token),
+    });
+    const body = (await response.json()) as { deleted: number };
+
+    // Clearing the archive takes the unlisted scratch with it, rather than
+    // leaving a row the user cannot see or remove.
+    assert.equal(body.deleted, config.historyLimit + 1);
+
+    const relisted = await fetch(`${baseUrl}/api/images`, authed(token));
+    const after = (await relisted.json()) as { total: number };
+
+    assert.equal(after.total, 0);
   });
 });
