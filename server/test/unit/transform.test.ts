@@ -41,6 +41,20 @@ describe('transform pipeline', () => {
     assert.equal(result.height, 150);
   });
 
+  it('resizes to the requested height, preserving the aspect ratio', async () => {
+    const result = await transformImage(await sourceImage(), { height: 150 });
+
+    assert.equal(result.height, 150);
+    assert.equal(result.width, 200);
+  });
+
+  it('resizes to both dimensions when a width and a height are given', async () => {
+    const result = await transformImage(await sourceImage(), { width: 100, height: 100 });
+
+    assert.equal(result.width, 100);
+    assert.equal(result.height, 100);
+  });
+
   it('converts the output format', async () => {
     const result = await transformImage(await sourceImage(), { width: 100, format: 'webp' });
 
