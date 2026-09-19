@@ -6,6 +6,8 @@ export type UserRow = {
   id: string;
   email: string;
   password_hash: string;
+  is_guest: boolean;
+  guest_upload_count: number;
   created_at: Date;
 };
 
@@ -21,6 +23,8 @@ export type ImageRow = {
   width: number | null;
   height: number | null;
   status: ImageStatus;
+  /** Outside the history cap: kept only as the scratch slot, and replaced by the next one. */
+  ephemeral: boolean;
   created_at: Date;
 };
 

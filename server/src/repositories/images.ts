@@ -7,6 +7,8 @@ export type NewImage = {
   mimeType: string;
   sizeBytes: number;
   originalFilename: string | null;
+  /** Outside the history cap: the scratch slot, replaced by the next upload. */
+  ephemeral?: boolean;
 };
 
 export async function createImage({
@@ -15,12 +17,13 @@ export async function createImage({
   mimeType,
   sizeBytes,
   originalFilename,
+  ephemeral = false,
 }: NewImage): Promise<ImageRow> {
   const { rows } = await pool.query<ImageRow>(
-    `INSERT INTO images (user_id, original_key, mime_type, size_bytes, original_filename)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO images (user_id, original_key, mime_type, size_bytes, original_filename, ephemeral)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING *`,
-    [userId, originalKey, mimeType, sizeBytes, originalFilename],
+    [userId, originalKey, mimeType, sizeBytes, originalFilename, ephemeral],
   );
 
   const image = rows[0];
@@ -39,6 +42,9 @@ export async function findImageByIdForUser(id: string, userId: string): Promise<
   return rows[0] ?? null;
 }
 
+// History is what the user is shown, so the cap and the listing have to agree on
+// what counts: an ephemeral row exists only to carry a transform past a full
+// history and is never listed.
 export async function listImagesForUser(
   userId: string,
   limit: number,
@@ -46,7 +52,7 @@ export async function listImagesForUser(
 ): Promise<ImageRow[]> {
   const { rows } = await pool.query<ImageRow>(
     `SELECT * FROM images
-     WHERE user_id = $1
+     WHERE user_id = $1 AND ephemeral = false
      ORDER BY created_at DESC
      LIMIT $2 OFFSET $3`,
     [userId, limit, offset],
@@ -55,9 +61,9 @@ export async function listImagesForUser(
   return rows;
 }
 
-export async function countImagesForUser(userId: string): Promise<number> {
+export async function countHistoryForUser(userId: string): Promise<number> {
   const { rows } = await pool.query<{ count: string }>(
-    'SELECT count(*)::text AS count FROM images WHERE user_id = $1',
+    'SELECT count(*)::text AS count FROM images WHERE user_id = $1 AND ephemeral = false',
     [userId],
   );
 
@@ -76,9 +82,32 @@ export async function deleteImageForUser(id: string, userId: string): Promise<Im
 }
 
 export async function deleteAllImagesForUser(userId: string): Promise<ImageRow[]> {
+  const { rows } = await pool.query<ImageRow>('DELETE FROM images WHERE user_id = $1 RETURNING *', [
+    userId,
+  ]);
+
+  return rows;
+}
+
+// Clearing the scratch slot is what keeps a full history bounded. A scratch that
+// is still being transformed is left alone - deleting its row would make the
+// worker fail against an image that no longer exists - and the next upload
+// collects it instead.
+export async function deleteSettledEphemeralForUser(
+  userId: string,
+  keepId: string,
+): Promise<ImageRow[]> {
   const { rows } = await pool.query<ImageRow>(
-    'DELETE FROM images WHERE user_id = $1 RETURNING *',
-    [userId],
+    `DELETE FROM images
+     WHERE user_id = $1
+       AND ephemeral = true
+       AND id <> $2
+       AND NOT EXISTS (
+         SELECT 1 FROM jobs
+         WHERE jobs.image_id = images.id AND jobs.status IN ('pending', 'processing')
+       )
+     RETURNING *`,
+    [userId, keepId],
   );
 
   return rows;

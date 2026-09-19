@@ -44,4 +44,11 @@ export const config = {
   sqsEndpoint: optional('SQS_ENDPOINT', ''),
   sqsVisibilityTimeout: readInt('SQS_VISIBILITY_TIMEOUT', 300, 1),
   maxInputPixels: readInt('MAX_INPUT_PIXELS', 50_000_000, 1),
+  // How many images a guest account may upload before it has to register.
+  // Registered accounts are not capped.
+  guestUploadLimit: readInt('GUEST_UPLOAD_LIMIT', 5, 1),
+  // How many images a user may keep in their history. Past this a transform still
+  // runs, but its result is not kept - the scratch slot holds the latest one
+  // instead of it accumulating.
+  historyLimit: readInt('HISTORY_LIMIT', 12, 1),
 } as const;

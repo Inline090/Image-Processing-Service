@@ -4,6 +4,7 @@ import type { UserRow } from '../db/types.js';
 export type NewUser = {
   email: string;
   passwordHash: string;
+  isGuest?: boolean;
 };
 
 export class DuplicateEmailError extends Error {
@@ -24,15 +25,19 @@ function isUniqueViolation(err: unknown): boolean {
   );
 }
 
-export async function createUser({ email, passwordHash }: NewUser): Promise<UserRow> {
+export async function createUser({
+  email,
+  passwordHash,
+  isGuest = false,
+}: NewUser): Promise<UserRow> {
   let rows: UserRow[];
 
   try {
     const result = await pool.query<UserRow>(
-      `INSERT INTO users (email, password_hash)
-       VALUES ($1, $2)
-       RETURNING id, email, password_hash, created_at`,
-      [email, passwordHash],
+      `INSERT INTO users (email, password_hash, is_guest)
+       VALUES ($1, $2, $3)
+       RETURNING id, email, password_hash, is_guest, guest_upload_count, created_at`,
+      [email, passwordHash, isGuest],
     );
 
     rows = result.rows;
@@ -54,7 +59,7 @@ export async function createUser({ email, passwordHash }: NewUser): Promise<User
 
 export async function findUserByEmail(email: string): Promise<UserRow | null> {
   const { rows } = await pool.query<UserRow>(
-    'SELECT id, email, password_hash, created_at FROM users WHERE email = $1',
+    'SELECT id, email, password_hash, is_guest, guest_upload_count, created_at FROM users WHERE email = $1',
     [email],
   );
 
@@ -63,9 +68,18 @@ export async function findUserByEmail(email: string): Promise<UserRow | null> {
 
 export async function findUserById(id: string): Promise<UserRow | null> {
   const { rows } = await pool.query<UserRow>(
-    'SELECT id, email, password_hash, created_at FROM users WHERE id = $1',
+    'SELECT id, email, password_hash, is_guest, guest_upload_count, created_at FROM users WHERE id = $1',
     [id],
   );
 
   return rows[0] ?? null;
+}
+
+// Spend one unit of a guest's allowance. Deliberately a counter rather than a
+// count of live images: the allowance is consumed by the act of uploading and is
+// never returned, so clearing the history cannot win quota back.
+export async function recordGuestUpload(userId: string): Promise<void> {
+  await pool.query('UPDATE users SET guest_upload_count = guest_upload_count + 1 WHERE id = $1', [
+    userId,
+  ]);
 }
