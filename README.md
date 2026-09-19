@@ -12,7 +12,7 @@ Failed jobs are retried instead of being dropped. The message remains in the que
 
 ## Features
 
-- **JWT Authentication**: Register and log in with email and password
+- **JWT Authentication**: Sign in through Google, Facebook or Twitter, or continue as a guest
 - **Image Upload**: Multipart uploads up to 10 MB, stored in a private S3 bucket
 - **Async Processing**: Transformations are queued and handled by a separate worker
 - **Transform Pipeline**: Resize, crop, rotate, trim, pad, mirror, modulate, blur, sharpen, grayscale, sepia, watermark, background flattening and format conversion with Sharp
@@ -29,7 +29,8 @@ Failed jobs are retried instead of being dropped. The message remains in the que
 ### Prerequisites
 
 - Node.js 20+ and npm
-- Docker, for PostgreSQL, MinIO (S3) and ElasticMQ (SQS)
+- PostgreSQL 16 - a database you run yourself, or a hosted one such as Supabase (see [Hosting](#hosting))
+- An AWS account, for the S3 bucket and the SQS queues
 
 ### 1. Clone and Install
 
@@ -39,13 +40,9 @@ cd "Image Processing Service"
 npm install
 ```
 
-### 2. Start the Backing Services
+### 2. Have a Database Ready
 
-```bash
-docker compose up -d
-```
-
-This starts PostgreSQL, MinIO, ElasticMQ and a one-shot container that creates the bucket. It is safe to re-run.
+Storage and the queue are AWS services, so those are set up in [Deploy to AWS](#deploy-to-aws) below. The database is the one piece this repository does not start for you: use a PostgreSQL 16 instance you can already reach, or create a hosted one - Supabase and Neon both hand you a ready-made url, covered under [The database](#the-database). Its url goes into `DATABASE_URL` in the next step.
 
 ### 3. Configure the Environment
 
@@ -53,13 +50,14 @@ This starts PostgreSQL, MinIO, ElasticMQ and a one-shot container that creates t
 cp server/.env.example server/.env
 ```
 
-`JWT_SECRET` is the only value you have to supply. Everything else has a working local default.
+`JWT_SECRET` is the only value you have to supply. Everything else has a working default except the AWS settings, which are covered in [Deploy to AWS](#deploy-to-aws).
 
-- `S3_ENDPOINT` and `SQS_ENDPOINT` are set for the local containers. Leave both empty to point the same code at real AWS.
 - `MAX_INPUT_PIXELS` caps the decoded size of an upload, default 50 megapixels.
 - `GUEST_UPLOAD_LIMIT` caps how many images a guest account may upload, default 5. Set it high to make guests effectively unlimited, or to 1 to make the account a single-shot trial.
 - `HISTORY_LIMIT` caps how many images a user keeps in their history, default 12. Past the cap an upload is not refused - see [History limit](#history-limit) below.
 - `SQS_VISIBILITY_TIMEOUT` must exceed the slowest job, or a message can be picked up twice.
+- `CORS_ORIGINS` lists the browser origins allowed to call the API, comma separated. Empty allows same-origin only.
+- `TRUST_PROXY` is the number of proxies in front of the API. Set it to 1 behind a load balancer, or every visitor is rate limited as one address.
 
 ### 4. Create the Database Tables
 
@@ -87,8 +85,6 @@ Visit `http://localhost:5173` for the client.
 
 - Client - http://localhost:5173
 - API - http://localhost:3000
-- MinIO console - http://localhost:9001, `minioadmin` / `minioadmin`
-- ElasticMQ UI - http://localhost:9325
 - PostgreSQL - `localhost:5432`, database `image_processing`, `ips` / `ips`
 
 ## Project Structure
@@ -97,6 +93,7 @@ Visit `http://localhost:5173` for the client.
 server/
 ├── migrations/          # numbered .sql migrations
 └── src/
+    ├── auth/            # passport strategies, provider setup, signed state
     ├── controllers/     # request handlers
     ├── db/              # pool, migration runner, row types
     ├── middleware/      # auth, validation, rate limiting, upload, errors
@@ -105,8 +102,9 @@ server/
     ├── repositories/    # typed SQL per table
     ├── routes/          # route definitions
     ├── schemas/         # zod schemas
+    ├── services/        # matching a provider account to a user
     ├── storage/         # S3 client
-    ├── utils/           # jwt and password hashing
+    ├── utils/           # jwt signing and verification
     ├── app.ts           # express wiring
     ├── worker.ts        # queue consumer
     └── index.ts         # API entry point
@@ -133,7 +131,8 @@ client/
 
 ## Database Schema
 
-- **users**: id, email, password_hash, is_guest, created_at
+- **users**: id, email, password_hash, is_guest, guest_upload_count, created_at. `password_hash` is left in place but nothing writes it: sign-in is through a provider, and a guest account has no password at all
+- **oauth_accounts**: id, user_id, provider, provider_id, created_at. One row per linked sign-in provider, so one person can attach several
 - **images**: id, user_id, original_key, processed_key, mime_type, processed_mime_type, original_filename, size_bytes, width, height, status, created_at
 - **jobs**: id, image_id, user_id, options, options_hash, status, attempts, error, processed_key, width, height, format, created_at, updated_at
 - **schema_migrations**: applied migration names
@@ -142,21 +141,21 @@ client/
 
 Every success response is `{ resource: ... }` and every error is `{ error: { message } }`.
 
-| Method | Endpoint                    | Description                                                           |
-| ------ | --------------------------- | --------------------------------------------------------------------- |
-| GET    | `/api/health`               | Liveness check                                                        |
-| POST   | `/api/auth/register`        | `{ email, password }`, password min 8 characters, `409` if taken      |
-| POST   | `/api/auth/login`           | `{ email, password }`, returns a bearer token                         |
-| POST   | `/api/auth/guest`           | Creates a throwaway account and returns a token, no body required     |
-| GET    | `/api/auth/me`              | Current user, bearer token                                            |
-| POST   | `/api/images`               | Multipart, field `image`, max 10 MB, capped for guest accounts        |
-| GET    | `/api/images`               | `?page=1&limit=20`, own images only, newest first                     |
-| GET    | `/api/images/:id`           | Returns `404` for someone else's image                                |
-| GET    | `/api/images/:id/download`  | `?variant=original` or `processed`, returns a pre-signed download url |
-| DELETE | `/api/images/:id`           | Deletes one image and its stored objects, `404` if it is not yours    |
-| DELETE | `/api/images`               | Deletes every image you own, and their stored objects, `{ deleted }`  |
-| POST   | `/api/images/:id/transform` | Returns `202` with a job, or `200` if that transform is cached        |
-| GET    | `/api/jobs/:id`             | Job status, for polling                                               |
+| Method | Endpoint                       | Description                                                           |
+| ------ | ------------------------------ | --------------------------------------------------------------------- |
+| GET    | `/api/health`                  | Liveness check                                                        |
+| POST   | `/api/auth/guest`              | Creates a throwaway account and returns a token, no body required     |
+| GET    | `/api/auth/me`                 | Current user, bearer token                                            |
+| GET    | `/api/auth/:provider`          | Starts a provider sign-in: `google`, `facebook` or `twitter`          |
+| GET    | `/api/auth/:provider/callback` | Where the provider returns, and ends in a redirect to the client      |
+| POST   | `/api/images`                  | Multipart, field `image`, max 10 MB, capped for guest accounts        |
+| GET    | `/api/images`                  | `?page=1&limit=20`, own images only, newest first                     |
+| GET    | `/api/images/:id`              | Returns `404` for someone else's image                                |
+| GET    | `/api/images/:id/download`     | `?variant=original` or `processed`, returns a pre-signed download url |
+| DELETE | `/api/images/:id`              | Deletes one image and its stored objects, `404` if it is not yours    |
+| DELETE | `/api/images`                  | Deletes every image you own, and their stored objects, `{ deleted }`  |
+| POST   | `/api/images/:id/transform`    | Returns `202` with a job, or `200` if that transform is cached        |
+| GET    | `/api/jobs/:id`                | Job status, for polling                                               |
 
 ## Transform Options
 
@@ -249,18 +248,137 @@ The listing and the count share one predicate, so the size the UI reports and th
 - **Frontend**: React 19, TypeScript, Vite
 - **Backend**: Node.js, Express 5, TypeScript
 - **Database**: PostgreSQL 16 with plain SQL through `pg`, and numbered `.sql` migrations
-- **Storage**: S3 through AWS SDK v3, with MinIO running locally
-- **Queue**: SQS through AWS SDK v3, with ElasticMQ running locally and a dead-letter queue
+- **Storage**: S3 through AWS SDK v3
+- **Queue**: SQS through AWS SDK v3, with a dead-letter queue
 - **Image processing**: Sharp
 - **Validation**: zod
-- **Security**: bcrypt, JWT bearer tokens, rate limiting
+- **Security**: JWT bearer tokens, rate limiting, Passport for provider sign-in
 - **Tooling**: Prettier, husky with lint-staged, node:test, GitHub Actions
 
-MinIO and ElasticMQ speak the real S3 and SQS APIs, so leaving `S3_ENDPOINT` and `SQS_ENDPOINT` empty is the only change needed to point this code at AWS.
+## Deploy to AWS
+
+Storage and the queue are real AWS services, so the account has to exist before the app will run.
+
+### 1. Create the bucket
+
+Make one private bucket, in the region you are going to run in, and put its name in `S3_BUCKET`. **The code never creates a bucket.** Keep Block Public Access on: nothing needs to be public, because images are only ever read through short-lived signed urls.
+
+### 2. Create the queues
+
+Either create two standard queues by hand - `transformations` and `transformations-dlq` - or let the app create them on first use. The main queue needs the dead-letter one set as its redrive target with a max receive count of 3; the app configures that itself when it creates them.
+
+### 3. Grant permission
+
+The app needs these on the bucket:
+
+- `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`
+
+and these on the queues:
+
+- `sqs:SendMessage`, `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueUrl`, `sqs:GetQueueAttributes`, `sqs:SetQueueAttributes`
+
+The app writes the visibility timeout and the dead-letter rule onto the main queue on every start, and reads the dead-letter queue's ARN to do it, so `GetQueueUrl`, `GetQueueAttributes` and `SetQueueAttributes` are always needed. `sqs:CreateQueue` is only needed if the queues do not exist yet - create them yourself and that one can be dropped.
+
+### 4. Set the region and credentials
+
+`AWS_REGION` must match the bucket's region, or S3 replies with a redirect error that does not mention the region at all.
+
+Credentials come from the standard AWS chain: an instance role, a profile, or `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in the environment. Do not put keys in `server/.env` if the host can supply them.
+
+### Things to know on a real account
+
+- A bad AWS setting does not stop the API from booting. It shows up later as `Internal server error` in the browser, with the real reason only in the server log, so keep the log open on the first run.
+- The worker does check its queue at startup, so a queue or permission problem is reported there with a clear message.
+- With no credentials at all, the SDK first tries the EC2 metadata endpoint, which stalls for a while on a machine that is not an EC2 instance. Set `AWS_EC2_METADATA_DISABLED=true` to make it fail straight away - but never set that on a host that relies on an instance role for its credentials.
+- SQS delivers a message at least once. A rare duplicate delivery processes the same image twice and leaves one unreferenced file behind in the bucket.
+
+## Hosting
+
+Three pieces, three homes. None of this is tied to one provider: a managed Postgres, one always-on service for the API, a second for the worker, and a static host for the client.
+
+### The database
+
+Neon and Supabase both hand you a `DATABASE_URL` ending in `sslmode=require`. Keep it:
+
+- The app reads that setting itself, so `require` means what Postgres means by it - encrypt, but do not check the certificate. The connection-string parser in the driver would have read it as "encrypt and verify", which is a stricter test than either host asks for and fails with an error that never mentions `sslmode`. Use `sslmode=verify-full` if you do want the certificate checked.
+- Run the migrations once against the new database before the first start:
+
+```bash
+DATABASE_URL="postgres://..." npm run migrate --workspace=server
+```
+
+- A pooled address works - Supabase's port 6543 or Neon's pooled endpoint. The code sends plain queries and uses no prepared statements.
+
+### The API
+
+- Build: `npm run build --workspace=server`
+- Start: `npm start --workspace=server`
+- It listens on the port the host gives it, read from `PORT`.
+- Health check path: `/api/health`
+- Needs: `DATABASE_URL`, `JWT_SECRET`, `NODE_ENV=production`, `AWS_REGION`, `S3_BUCKET`, and AWS credentials.
+- Behind the host's load balancer, also set `TRUST_PROXY=1`, or every visitor shares one rate-limit bucket.
+
+### The worker
+
+Same code, same settings, different start command: `npm run start:worker --workspace=server`.
+
+It opens no port, so run it as a background worker rather than a web service, and leave it running. Without it uploads are accepted and then sit at `pending` forever.
+
+The worker can also run as an AWS Lambda function instead of a long-lived process. `Dockerfile.lambda` builds that image, and its command points at the queue handler in `server/dist/lambda/workerHandler.js`, which the queue invokes once per batch of messages. In that shape the queue's own redrive policy is what retries a job and eventually dead-letters it.
+
+### The client
+
+- Build: `npm run build --workspace=client`, which writes `client/dist`
+- Publish that folder as a static site
+- Set `VITE_API_URL` to the API's address **before building**. Vite bakes the value into the bundle, so changing it afterwards needs a rebuild rather than a restart.
+- Add the client's address to the API's `CORS_ORIGINS`, or the browser will refuse every call.
+- No rewrite rules are needed: the app has no routes, so everything is served from `index.html`.
+
+### Set production mode
+
+Set `NODE_ENV=production` on both services. Without it the app falls back to development, which prints colourised logs - harmless, but noise in a log viewer.
+
+## Signing in
+
+There are three ways in, and no email-and-password sign-up. That was deliberate: nothing verified an address, so it only pretended to check identity. Signing in through a provider is the way to get an account that is actually checked, and a guest session covers trying the editor without one.
+
+### As a guest
+
+`POST /api/auth/guest` makes a throwaway account and hands back a token, so the editor can be used straight away. It is capped: five uploads, counted server-side and never refunded, and clearing the history does not win any back. The browser also remembers that the allowance was spent, so starting a fresh guest session does not hand out another five. An account made this way has no password, and an address nobody could reach - `guest-<uuid>@guest.local` - made up only to satisfy a required column.
+
+### Through Google, Facebook or Twitter
+
+Real, and the way to get an account whose identity is actually checked. Passport runs the round trip, and each provider is optional as a pair of credentials - leave a pair empty and its route explains that the provider is not set up rather than sending the browser somewhere that cannot work.
+
+Register an app with each provider you want, pointing its callback at:
+
+```
+<OAUTH_CALLBACK_BASE>/<provider>/callback
+```
+
+- Google - [console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials)
+- Facebook - [developers.facebook.com/apps](https://developers.facebook.com/apps)
+- Twitter - [developer.x.com/en/portal/dashboard](https://developer.x.com/en/portal/dashboard)
+
+Then set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, `FACEBOOK_APP_ID` and `FACEBOOK_APP_SECRET`, or `TWITTER_CLIENT_ID` and `TWITTER_CLIENT_SECRET`. `OAUTH_CALLBACK_BASE` is the address the API is reachable at, and every callback is built from it.
+
+How it works:
+
+1. The browser is sent to `/api/auth/<provider>`, which sends it on to the provider with a signed `state`.
+2. The provider returns it to the callback with a code, and Passport checks the state before doing anything else.
+3. The code is swapped for the account's details, and the account is matched to a user - see below.
+4. The browser is sent back to `CLIENT_URL` with our token in the url fragment, which the client reads and then wipes from the address bar.
+
+Worth knowing:
+
+- **A provider account is matched on the provider's own id**, which cannot be renamed the way a username can, so signing in twice lands on the same person.
+- **A matching address joins an existing account**, so signing in with Google and later with Facebook, using the same address, lands on one account with one history. Google and Facebook both confirm the address they hand over.
+- **Twitter hands over no address at all.** X will not grant the email scope to a basic app, and the column is required and unique, so those accounts are labelled `twitter-<id>@twitter.local`. Nothing sends mail, so it is only ever a label.
+- **No sessions.** Passport normally keeps the state in one; here it is signed and checked from the signature alone, so the API stays stateless.
+- **Nothing from the request decides where the browser is sent back**, so the callback cannot be aimed somewhere else.
 
 ## Security
 
-- Passwords are hashed with bcrypt before they reach the database
 - Requests are authenticated with JWT bearer tokens
 - Every image query is scoped to the authenticated user
 - Transform options are validated against a whitelist schema
@@ -268,16 +386,20 @@ MinIO and ElasticMQ speak the real S3 and SQS APIs, so leaving `S3_ENDPOINT` and
 - The bucket is private, and images are only reachable through short-lived pre-signed URLs
 - Downloads sign the `Content-Disposition` into the url, so the saved filename is chosen by the server and a client cannot rewrite it
 - Auth endpoints are rate limited
+- A provider sign-in is tied to a signed `state` issued by this server, checked before the code is exchanged, so a callback arranged by somebody else is refused
+- A provider account is matched on the provider's own id, and only an address the provider vouches for may be joined to an existing account
+- The signed-in token comes back in the url fragment rather than the query, keeping it out of server logs and out of the next request
+- Email registration is not verified, so an address identifies an account rather than proving one
 
 ## Testing
 
 ```bash
 npm test --workspace=server                  # unit tests, no infrastructure needed
-npm run test:integration --workspace=server  # needs docker compose up -d
+npm run test:integration --workspace=server  # needs a running PostgreSQL
 npm run check                                # lint + typecheck
 ```
 
-The unit suite covers the Sharp pipeline, the transform options cache key, JWT handling, password hashing and the validation limits. CI runs on every push: it lints both workspaces, typechecks the server, builds the client, applies the migrations, and runs both suites against a Postgres service container.
+The unit suite covers the Sharp pipeline, the transform options cache key, JWT handling, the sign-in state and its store, the database ssl mode and the validation limits. The integration suite covers the API, the provider routes up to the exchange with the provider itself, and how a provider account is matched to a user. The exchange needs a real account and a network, so it is not automated. CI runs on every push: it lints both workspaces, typechecks the server, builds the client, applies the migrations, and runs both suites against a Postgres service container.
 
 ## Contributing
 
