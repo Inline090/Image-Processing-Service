@@ -64,6 +64,26 @@ export async function countImagesForUser(userId: string): Promise<number> {
   return Number(rows[0]?.count ?? 0);
 }
 
+// Both delete helpers return the removed rows so the caller can clean up the
+// objects they point at. Deleting an image cascades to its jobs.
+export async function deleteImageForUser(id: string, userId: string): Promise<ImageRow | null> {
+  const { rows } = await pool.query<ImageRow>(
+    'DELETE FROM images WHERE id = $1 AND user_id = $2 RETURNING *',
+    [id, userId],
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function deleteAllImagesForUser(userId: string): Promise<ImageRow[]> {
+  const { rows } = await pool.query<ImageRow>(
+    'DELETE FROM images WHERE user_id = $1 RETURNING *',
+    [userId],
+  );
+
+  return rows;
+}
+
 export async function markImageReady(id: string, processedKey: string): Promise<ImageRow> {
   const { rows } = await pool.query<ImageRow>(
     `UPDATE images

@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import {
+  clearImages,
   downloadImage,
   getImage,
   list,
+  removeImage,
   transform,
   uploadImage,
 } from '../controllers/images.controller.js';
@@ -17,6 +19,8 @@ export const imagesRouter = Router();
 imagesRouter.get('/', requireAuth, list);
 imagesRouter.get('/:id', requireAuth, getImage);
 imagesRouter.get('/:id/download', requireAuth, downloadImage);
+imagesRouter.delete('/', requireAuth, clearImages);
+imagesRouter.delete('/:id', requireAuth, removeImage);
 imagesRouter.post('/', requireAuth, uploadSingleImage, validateImageFile, uploadImage);
 imagesRouter.post(
   '/:id/transform',

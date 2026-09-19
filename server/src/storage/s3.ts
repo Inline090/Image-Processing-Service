@@ -1,4 +1,9 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config.js';
 import { contentDisposition } from './filename.js';
@@ -27,6 +32,10 @@ export async function getObject(key: string): Promise<Buffer> {
   }
 
   return Buffer.from(await result.Body.transformToByteArray());
+}
+
+export async function deleteObject(key: string): Promise<void> {
+  await s3.send(new DeleteObjectCommand({ Bucket: config.s3Bucket, Key: key }));
 }
 
 export function signedUrl(key: string, expiresInSeconds = 900): Promise<string> {

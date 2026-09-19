@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Request, Response } from 'express';
 import type { ImageRow, JobRow } from '../db/types.js';
+import { logger } from '../logger.js';
 import { AppError } from '../middleware/error.js';
 import { formatIssues } from '../middleware/validate.js';
 import { hashTransformOptions } from '../processing/optionsHash.js';
@@ -8,6 +9,8 @@ import { publishTransformJob } from '../queue/sqs.js';
 import {
   countImagesForUser,
   createImage,
+  deleteAllImagesForUser,
+  deleteImageForUser,
   findImageByIdForUser,
   listImagesForUser,
 } from '../repositories/images.js';
@@ -15,7 +18,7 @@ import { createJob, findReadyJob } from '../repositories/jobs.js';
 import { downloadQuerySchema, listImagesQuerySchema } from '../schemas/image.schema.js';
 import type { TransformInput } from '../schemas/transform.schema.js';
 import { downloadFilename } from '../storage/filename.js';
-import { putObject, signedDownloadUrl, signedUrl } from '../storage/s3.js';
+import { deleteObject, putObject, signedDownloadUrl, signedUrl } from '../storage/s3.js';
 
 async function serializeImage(image: ImageRow) {
   return {
@@ -193,4 +196,56 @@ export async function downloadImage(req: Request, res: Response): Promise<void> 
   const filename = downloadFilename(image.original_filename, image.id, mimeType);
 
   res.json({ download: { url: await signedDownloadUrl(key, filename), filename } });
+}
+
+// The rows are already gone by this point, so a storage failure is logged rather
+// than surfaced: failing the request would only leave objects the user can no
+// longer see or reach.
+async function discardObjects(images: ImageRow[]): Promise<void> {
+  const keys = images.flatMap((image) =>
+    image.processed_key === null
+      ? [image.original_key]
+      : [image.original_key, image.processed_key],
+  );
+
+  await Promise.all(
+    keys.map((key) =>
+      deleteObject(key).catch((err: unknown) => {
+        logger.warn({ err, key }, 'could not delete the stored object');
+      }),
+    ),
+  );
+}
+
+export async function removeImage(req: Request, res: Response): Promise<void> {
+  const authUser = req.user;
+  if (authUser === undefined) {
+    throw new AppError('Not authenticated', 401);
+  }
+
+  const imageId = req.params.id;
+  if (typeof imageId !== 'string') {
+    throw new AppError('Image id is required', 400);
+  }
+
+  const image = await deleteImageForUser(imageId, authUser.sub);
+  if (image === null) {
+    throw new AppError('Image not found', 404);
+  }
+
+  await discardObjects([image]);
+
+  res.json({ deleted: 1 });
+}
+
+export async function clearImages(req: Request, res: Response): Promise<void> {
+  const authUser = req.user;
+  if (authUser === undefined) {
+    throw new AppError('Not authenticated', 401);
+  }
+
+  const images = await deleteAllImagesForUser(authUser.sub);
+  await discardObjects(images);
+
+  res.json({ deleted: images.length });
 }
