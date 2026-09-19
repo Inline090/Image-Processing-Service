@@ -1,129 +1,196 @@
-/* Component layer — the app's semantic classes, built entirely from tokens. */
+/* Component layer. Cream ground, white rounded cards, one apricot accent, soft
+   depth, and line art in the background. */
 
 /* ── Shell ─────────────────────────────────────────────────────────────── */
 
 .shell {
-  position: relative;
-  z-index: 1; /* clears the fixed paper-texture overlay */
   max-width: var(--container);
   margin: 0 auto;
-  padding: var(--space-5) var(--space-4) var(--space-12);
+  padding: var(--space-6) var(--space-5) var(--space-8);
 }
 
-.shell-header {
+/* No rule under the top bar — the reference lets it float on the cream. */
+.topbar {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-4);
-  padding-bottom: var(--space-4);
-  margin-bottom: var(--space-6);
-  border-bottom: 1px solid var(--border);
-}
-
-.wordmark {
-  font-family: var(--font-display);
-  font-size: 1.5rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.2;
+  gap: var(--space-5);
 }
 
 .brand {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: var(--space-3);
 }
 
-/* Decorative: the wordmark beside it already carries the name, so alt is empty. */
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--foreground);
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-size: var(--text-title);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+
+/* Decorative: the wordmark carries the name, so alt is empty. The height is set
+   rather than inferred, because an image left to itself would size the block to
+   its own pixels instead of matching the wordmark it sits beside. Width follows
+   the mark's own ratio. */
 .brand-mark {
-  height: 30px;
+  height: var(--brand-block);
   width: auto;
+}
+
+.brand-sub {
+  font-size: var(--text-label);
+  color: var(--muted-foreground);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding-top: var(--space-2);
 }
 
 /* ── Signed-out screen ─────────────────────────────────────────────────── */
 
-/* Sits under .shell, so the signed-out screen's total top offset is these two
-   stacked. It was 5rem here on top of 2rem there, which pushed the lockup a
-   long way down the viewport. */
 .auth {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-6);
-  padding: var(--space-8) var(--space-2) var(--space-8);
-}
-
-/* Groups the descriptor and the wordmark into one lockup, so the wider gap on
-   .auth separates the brand from the card rather than splitting the lockup. */
-.auth-intro {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-3);
-  color: var(--accent-strong);
-  /* Scales the inherited .small-caps label from a 12px eyebrow into a
-     display-size descriptor, so it stands with the wordmark instead of
-     whispering under it. */
-  --label-size: clamp(1.125rem, 2.2vw, 1.5rem);
-}
-
-/* The mark leads the lockup, at a size the 147x127 source still holds up at. */
-.auth-mark {
-  height: 64px;
-  width: auto;
-}
-
-/* The wordmark carries the signed-out screen on its own now. */
-.auth-brand {
-  font-size: var(--text-display);
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  line-height: 1;
-  color: var(--foreground);
+  gap: var(--space-8);
+  padding: var(--space-section) var(--space-4);
 }
 
 .auth-card {
+  position: relative;
+  z-index: 1;
   width: 100%;
   max-width: var(--measure);
 }
 
+.auth-intro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  text-align: center;
+}
+
+.auth-mark {
+  height: 44px;
+  width: auto;
+  margin-bottom: var(--space-2);
+}
+
 /* ── Panels ────────────────────────────────────────────────────────────── */
 
+/* The signed-in view: full-width panels stacked. Deliberately not the centred
+   .auth column, which would shrink every panel to its content width. */
+.workspace {
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--space-8);
+}
+
 .panel {
-  background: var(--card);
-  border: 1px solid var(--border);
+  background: var(--surface);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-card);
   padding: var(--space-6);
 }
 
 .panel + .panel {
-  margin-top: var(--gap-panel);
+  margin-top: var(--space-section);
 }
 
-/* The 2px gold edge is reserved for the two featured surfaces. */
-.panel--accent {
-  border-top: 2px solid var(--accent);
+/* The sign-in card is the hero of its screen, so it gets the deeper shadow. */
+.auth-card .panel {
+  box-shadow: var(--shadow-pop);
+  padding: var(--space-8) var(--space-6);
 }
 
 .panel-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  padding-bottom: var(--space-3);
   margin-bottom: var(--space-5);
-  border-bottom: 1px solid var(--border);
 }
 
 .panel-title {
-  font-size: var(--text-card);
+  font-family: var(--font-display);
+  font-size: var(--text-title);
   font-weight: 600;
 }
 
+/* Centred inside the sign-in card, as in the reference. */
+.auth-card .panel-header {
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+  text-align: center;
+}
+
+.auth-card .panel-title {
+  font-size: var(--text-heading);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.kicker {
+  display: block;
+  margin-bottom: var(--space-2);
+}
+
 .panel-lede {
+  margin-top: var(--space-1);
+}
+
+/* The reference's "Don't have an account? Request Now" line. */
+.auth-alt {
+  font-size: var(--text-label);
   color: var(--muted-foreground);
-  font-size: var(--text-small);
+  text-align: center;
+}
+
+/* A rule either side of the label, rather than the literal dashes the reference
+   draws — same effect, and it stays centred at any width. */
+.divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-label);
+  color: var(--muted-foreground);
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Wraps the guest link so its hit area stays the width of the word. */
+.auth-guest {
+  display: flex;
+  justify-content: center;
+}
+
+/* Shown beside sign-out for guest sessions. */
+.account-hint {
+  font-size: var(--text-label);
+  color: var(--muted-foreground);
 }
 
 /* ── Forms ─────────────────────────────────────────────────────────────── */
@@ -135,85 +202,94 @@ form {
 }
 
 fieldset {
-  border: 0;
-  padding: 0;
-  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
 }
 
 fieldset + fieldset {
-  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
 }
 
-/* Legend is styled rather than made a flex child, because legend has
-   special-cased layout behaviour inside flex and grid containers. */
 legend {
-  font-family: var(--font-mono);
+  font-family: var(--font-display);
   font-size: var(--text-label);
-  font-weight: 500;
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
-  color: var(--accent-strong);
-  padding: 0;
-  margin-bottom: var(--space-4);
+  font-weight: 600;
+  margin-bottom: var(--space-2);
 }
 
 .group {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-5);
 }
 
-/* Two-or-more column field grid that reflows to a single column when narrow. */
 .pairs {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
-  gap: var(--space-4);
+  gap: var(--space-5);
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
 }
 
 .field-label {
+  font-size: var(--text-label);
+  font-weight: 500;
   color: var(--muted-foreground);
 }
 
-/* The custom controls below are excluded here and styled on their own. */
+/* The accepted values, kept visible under the control rather than only in the
+   tooltip, so the bounds are readable without hovering. Regular weight against
+   the label's 500 keeps the two from reading as one block of text. */
+.field-hint {
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
+
+/* The custom controls below are excluded and carry their own styling. */
 .field input:not([type='checkbox']):not(.file-input):not(.color-input),
 .field select {
-  font: inherit;
-  font-family: var(--font-body);
+  font-family: var(--font-sans);
+  font-size: var(--text-control);
   color: var(--foreground);
-  background: transparent;
-  min-height: 3rem;
-  padding: 0 var(--space-3);
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
+  padding: 0 var(--space-4);
+  min-height: 2.75rem;
+  width: 100%;
   touch-action: manipulation;
   transition:
-    border-color 150ms var(--ease),
-    background-color 150ms var(--ease);
+    border-color var(--duration) var(--ease),
+    box-shadow var(--duration) var(--ease);
 }
 
-.field input:not([type='checkbox']):hover,
+.field input:not([type='checkbox']):not(.file-input):not(.color-input):hover,
 .field select:hover {
-  border-color: var(--border-hover);
+  border-color: var(--border-strong);
 }
 
-.field input::placeholder {
-  color: var(--muted-foreground);
-  opacity: 0.65;
+/* The ink border is the cue; the apricot wash is the flourish. */
+.field input:not([type='checkbox']):not(.file-input):not(.color-input):focus-visible,
+.field select:focus-visible {
+  border-color: var(--foreground);
+  box-shadow: 0 0 0 3px var(--ring);
+  outline: none;
 }
 
-/* .color-input is excluded: this rule is more specific than its own opacity:0,
-   so without the exclusion a disabled colour input would render its native
-   swatch at 50% and show a square through the wheel. Its disabled look comes
-   from the :disabled + .color-wheel rule instead. */
+/* .color-input is excluded: this rule outranks its own opacity:0, and a disabled
+   colour input would otherwise show its native swatch through the wheel. */
 .field input:disabled:not(.color-input),
 .field select:disabled {
-  opacity: 0.5;
+  background: var(--surface-hover);
+  color: var(--subtle-foreground);
+  cursor: not-allowed;
 }
 
 .inline {
@@ -221,20 +297,26 @@ legend {
   flex-direction: row;
   align-items: center;
   gap: var(--space-2);
-  font-size: var(--text-small);
+  font-size: var(--text-control);
   cursor: pointer;
 }
 
 .inline input[type='checkbox'] {
   width: 1rem;
   height: 1rem;
-  accent-color: var(--accent-strong);
+  accent-color: var(--accent-hover);
   touch-action: manipulation;
 }
 
-/* A native file input draws its own button plus a "No file chosen" string that
-   CSS cannot reach, so it reads as a browser widget dropped into the page. The
-   real input is hidden but stays focusable, and this label is the control. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* ── File control ──────────────────────────────────────────────────────── */
+
 .file-input {
   position: absolute;
   width: 1px;
@@ -252,46 +334,40 @@ legend {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  min-height: 3rem;
-  padding: 0 var(--space-3);
+  min-height: 2.75rem;
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-4);
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   cursor: pointer;
-  transition:
-    border-color 150ms var(--ease),
-    background-color 150ms var(--ease);
+  transition: border-color var(--duration) var(--ease);
 }
 
 .file-field:hover {
-  border-color: var(--border-hover);
-  background: var(--muted);
+  border-color: var(--border-strong);
 }
 
-/* Stands in for the focus ring the hidden input cannot draw. */
 .file-field:focus-within {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
+  border-color: var(--foreground);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 
 .file-chip {
   display: inline-flex;
   align-items: center;
   flex: none;
-  min-height: 1.9rem;
+  min-height: 2.1rem;
   padding: 0 var(--space-3);
-  border: 1px solid var(--foreground);
+  background: var(--accent);
   border-radius: var(--radius-sm);
-  font-size: var(--text-small);
+  font-size: var(--text-control);
   font-weight: 500;
-  letter-spacing: 0.05em;
   white-space: nowrap;
-  transition: border-color var(--duration) var(--ease);
+  transition: background-color var(--duration) var(--ease);
 }
 
-/* Only the border shifts to gold: gold text on the muted fill measures 4.24:1,
-   under AA for text, so the chip's colour stays inherited. */
 .file-field:hover .file-chip {
-  border-color: var(--accent-strong);
+  background: var(--accent-hover);
 }
 
 .file-name {
@@ -300,19 +376,18 @@ legend {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--text-small);
+  font-size: var(--text-label);
   color: var(--muted-foreground);
 }
 
-/* The native colour swatch is a small square that reads as a browser widget.
-   The visible control is a full-spectrum circle; the real input shares the same
-   box, transparent but still clickable and reachable by keyboard. */
+/* ── Colour control ────────────────────────────────────────────────────── */
+
 .color-field {
   position: relative;
   display: inline-flex;
   flex: none;
-  width: 3rem;
-  height: 3rem;
+  width: 2.75rem;
+  height: 2.75rem;
 }
 
 .color-input {
@@ -343,35 +418,138 @@ legend {
     #b45bd6,
     #e5484d
   );
-  transition:
-    transform var(--duration) var(--ease),
-    box-shadow var(--duration) var(--ease);
 }
 
-.color-field:hover .color-wheel {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
-}
-
-/* Ring the wheel, not .color-field: the wrapper is an unrounded box, so an
-   outline on it would draw a square around the circle. */
 .color-field:focus-within .color-wheel {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--foreground);
   outline-offset: 2px;
 }
 
 /* Placed after the input in the DOM so this sibling selector can reach it. */
 .color-input:disabled + .color-wheel {
-  opacity: 0.5;
-  transform: none;
-  box-shadow: none;
+  opacity: 0.4;
 }
 
-.actions {
+/* ── Sliders ───────────────────────────────────────────────────────────── */
+
+.slider-field {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* Label left, live reading right, so the number sits where the eye lands. */
+.slider-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
   gap: var(--space-3);
+}
+
+.slider-value {
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+}
+
+/* The end captions under the track carry the allowed range, which is what the
+   number fields state as a hint. */
+.slider-bounds {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
+
+.slider {
+  --fill: 0%;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 1.25rem; /* the grabbable band, taller than the 6px track */
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* WebKit has no progress pseudo-element, so the fill is a two-stop gradient
+   whose stop the component writes from the value. */
+.slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(to right, var(--accent-hover) var(--fill), var(--border) var(--fill));
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: -0.375rem; /* centres the thumb on the 6px track */
+  border: 2px solid var(--accent-hover);
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  transition:
+    border-color var(--duration) var(--ease),
+    box-shadow var(--duration) var(--ease);
+}
+
+/* The thumb ring stands in for the outline, matching the wash every other
+   control gets on focus. */
+.slider:focus-visible {
+  outline: none;
+}
+
+.slider:focus-visible::-webkit-slider-thumb {
+  border-color: var(--foreground);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+/* Firefox draws the fill itself and needs no thumb margin. */
+.slider::-moz-range-track {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--border);
+}
+
+.slider::-moz-range-progress {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-hover);
+}
+
+.slider::-moz-range-thumb {
+  width: 1.125rem;
+  height: 1.125rem;
+  border: 2px solid var(--accent-hover);
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.slider:disabled {
+  cursor: not-allowed;
+}
+
+.slider:disabled::-webkit-slider-runnable-track {
+  background: var(--border);
+}
+
+.slider:disabled::-webkit-slider-thumb {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.slider:disabled::-moz-range-progress {
+  background: var(--border);
+}
+
+.slider:disabled::-moz-range-thumb {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
 }
 
 /* ── Buttons ───────────────────────────────────────────────────────────── */
@@ -381,171 +559,242 @@ legend {
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  font: inherit;
-  font-family: var(--font-body);
-  font-weight: 500;
-  letter-spacing: 0.05em;
-  min-height: 2.75rem; /* 44px touch target */
+  font-family: var(--font-display);
+  font-size: var(--text-label);
+  font-weight: 600;
+  min-height: 2.75rem;
   padding: 0 var(--space-5);
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   cursor: pointer;
   touch-action: manipulation;
   transition:
     background-color var(--duration) var(--ease),
     border-color var(--duration) var(--ease),
-    color var(--duration) var(--ease),
-    box-shadow var(--duration) var(--ease),
-    transform var(--duration) var(--ease);
+    color var(--duration) var(--ease);
 }
 
 .btn:disabled {
-  opacity: 0.55;
-  cursor: default;
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
+/* Apricot with ink text. White on this apricot would be 1.9:1. */
 .btn--primary {
-  background: var(--accent-strong);
+  background: var(--accent);
+  border-color: var(--accent);
   color: var(--accent-foreground);
-  box-shadow: var(--shadow-sm);
 }
 
 .btn--primary:hover:not(:disabled) {
   background: var(--accent-hover);
-  box-shadow: var(--shadow-accent);
-  transform: translateY(-1px);
+  border-color: var(--accent-hover);
 }
 
-.btn--primary:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.btn--outline {
-  background: transparent;
-  border-color: var(--foreground);
-  color: var(--foreground);
-}
-
-/* Text stays foreground here: gold on the muted fill only reaches 4.24:1, which
-   is under AA for body-sized text. The gold moves to the border, where it only
-   has to clear the 3:1 non-text threshold. */
 .btn--outline:hover:not(:disabled) {
-  background: var(--muted);
-  border-color: var(--accent-strong);
-  color: var(--foreground);
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
 }
 
-/* The quiet, editorial action: text only until hovered. */
 .btn--ghost {
-  background: none;
+  background: transparent;
   border-color: transparent;
-  padding: 0 var(--space-1);
   color: var(--muted-foreground);
-  text-decoration: underline;
-  text-decoration-color: transparent;
-  text-underline-offset: 4px;
 }
 
 .btn--ghost:hover:not(:disabled) {
+  background: var(--accent-soft);
   color: var(--foreground);
-  text-decoration-color: var(--accent);
+}
+
+.btn--link {
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border-color: transparent;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.btn--link:hover:not(:disabled) {
+  color: var(--muted-foreground);
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  padding: 0;
+  background: var(--surface);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background-color var(--duration) var(--ease),
+    border-color var(--duration) var(--ease),
+    color var(--duration) var(--ease);
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent-hover);
+  color: var(--foreground);
+}
+
+.icon-btn--danger:hover:not(:disabled) {
+  background: var(--danger-quiet);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 /* ── Feedback ──────────────────────────────────────────────────────────── */
 
 .notice {
+  font-size: var(--text-label);
   color: var(--danger);
-  background: var(--muted);
-  border-left: 2px solid var(--danger);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--danger-quiet);
+  border-radius: var(--radius-sm);
   padding: var(--space-3) var(--space-4);
-  font-size: var(--text-small);
+}
+
+/* The counterpart to .notice for something that is not a failure: a full history
+   is expected, the user just has to be told the result is not being kept. */
+.notice--info {
+  color: var(--foreground);
+  background: var(--accent-soft);
 }
 
 .status {
+  font-size: var(--text-label);
   color: var(--muted-foreground);
-  font-size: var(--text-small);
 }
 
-.mono {
-  font-family: var(--font-mono);
-  font-size: 0.85em;
+.code {
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
 }
 
-/* Serif display figures, for output dimensions and page counts. */
 .dimensions {
   font-family: var(--font-display);
-  font-size: 2rem;
-  font-weight: 500;
-  line-height: 1.1;
-  letter-spacing: -0.01em;
+  font-size: var(--text-heading);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .progress {
   height: 6px;
-  border-radius: 3px;
-  background: var(--muted);
+  background: var(--border);
+  border-radius: var(--radius-pill);
   overflow: hidden;
   margin: var(--space-4) 0;
 }
 
 .progress-bar {
   height: 100%;
-  background: var(--accent-strong);
+  background: var(--accent-hover);
+  border-radius: var(--radius-pill);
   transition: width var(--duration) var(--ease);
 }
 
-.preview {
+/* ── Figures ───────────────────────────────────────────────────────────── */
+
+.figure {
+  margin-top: var(--space-5);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  margin-top: var(--space-3);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 
-/* ── Gallery ───────────────────────────────────────────────────────────── */
+/* Not desaturated: this is the transform's actual output, and grading it would
+   stop you judging the result. */
+.preview {
+  width: 100%;
+}
 
+/* The chosen file, before anything has been submitted: a confirmation of what is
+   about to go up rather than the subject itself, so it stays a thumbnail instead
+   of pushing the form off the screen.
+
+   The height is set rather than capped, so the width comes from the image's own
+   ratio. Two things would otherwise defeat that: capping both axes at once makes a
+   replaced element take both maxima, and the column flex container around it would
+   stretch the width to the panel. */
+.preview--thumb {
+  height: 10rem;
+  width: auto;
+  max-width: 100%;
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.caption {
+  display: block;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-label);
+  color: var(--muted-foreground);
+}
+
+/* ── History grid ──────────────────────────────────────────────────────── */
+
+/* The frame owns the outer edge, each cell owns its right and bottom, so interior
+   lines stay single and the box stays closed on a partial last page. Three
+   columns means six per page fills exactly two rows. */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
-  gap: var(--space-4);
-}
-
-.card {
-  background: var(--card);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   overflow: hidden;
-  transition:
-    border-color var(--duration) var(--ease),
-    box-shadow var(--duration) var(--ease);
 }
 
-.card:hover {
-  border-color: var(--border-hover);
-  box-shadow: var(--shadow-md);
+.cell {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
-/* aspect-ratio reserves the box before the image loads, which prevents the
-   gallery reflowing as thumbnails arrive. */
 .thumb {
   width: 100%;
   aspect-ratio: 4 / 3;
   object-fit: cover;
-  background: var(--muted);
+  background: var(--surface-hover);
 }
 
-.meta {
+.cell-actions {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  color: var(--muted-foreground);
+  padding: var(--space-3);
+  margin-top: auto;
 }
 
-.card-actions {
+.confirm {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--space-4);
-  padding: 0 var(--space-3) var(--space-3);
+  padding: var(--space-4);
+  margin-bottom: var(--space-5);
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+}
+
+.confirm-text {
+  font-size: var(--text-control);
 }
 
 .pager {
@@ -553,25 +802,39 @@ legend {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  margin-top: var(--space-5);
+  margin-top: var(--space-6);
 }
 
-/* ── Narrow screens ────────────────────────────────────────────────────── */
+/* ── Sign-in footer ────────────────────────────────────────────────────── */
 
-@media (max-width: 40rem) {
+.auth-footer {
+  font-size: var(--text-label);
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 48rem) {
   .shell {
-    padding: var(--space-5) var(--space-4) var(--space-8);
-  }
-
-  .shell-header {
-    align-items: center;
+    padding: var(--space-5) var(--space-4) var(--space-6);
   }
 
   .panel {
-    padding: var(--space-4);
+    padding: var(--space-5);
+    border-radius: var(--radius);
   }
 
-  .card-actions {
-    gap: var(--space-2);
+  .auth-card .panel {
+    padding: var(--space-6) var(--space-5);
+  }
+
+  .panel + .panel {
+    margin-top: var(--space-8);
+  }
+
+  .auth {
+    padding: var(--space-8) 0;
+  }
+
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

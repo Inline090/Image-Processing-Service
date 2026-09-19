@@ -1,11 +1,18 @@
 import { useEffect, useState } from 'react';
-import { listImages, type DownloadVariant, type Image } from '../api';
+import { ArrowDownToLine, ImageDown, RefreshCw, Trash } from 'lucide-react';
+import { clearImages, deleteImage, listImages, type DownloadVariant, type Image } from '../api';
 import { downloadImage } from '../download';
 import { Button } from './ui/Button';
 import { Panel } from './ui/Panel';
 
 const PAGE_SIZE = 6;
 
+// A sentinel for "every image", distinguished from an image id.
+const ALL = 'all';
+
+// The parent remounts this panel (a changing `key`) when a transform lands, which
+// resets the page to one and re-runs the fetch below. Newest-first means page one
+// is where a fresh result appears.
 export function GalleryPanel() {
   const [page, setPage] = useState(1);
   const [reloads, setReloads] = useState(0);
@@ -13,6 +20,8 @@ export function GalleryPanel() {
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,7 +42,7 @@ export function GalleryPanel() {
           return;
         }
 
-        setError(err instanceof Error ? err.message : 'Could not load your uploads');
+        setError(err instanceof Error ? err.message : 'Could not load your history');
       });
 
     return () => {
@@ -50,56 +59,189 @@ export function GalleryPanel() {
     }
   }
 
+  // Stepping back a page keeps the view from landing on an emptied page.
+  function afterDelete(removed: number): void {
+    setConfirming(null);
+
+    if (images.length - removed <= 0 && page > 1) {
+      setPage(page - 1);
+      return;
+    }
+
+    setReloads(reloads + 1);
+  }
+
+  async function handleDelete(id: string): Promise<void> {
+    setBusy(true);
+
+    try {
+      await deleteImage(id);
+      setError(null);
+      afterDelete(1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete the image');
+      setConfirming(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleClear(): Promise<void> {
+    setBusy(true);
+
+    try {
+      await clearImages();
+      setError(null);
+      setConfirming(null);
+      setImages([]);
+      setTotal(0);
+
+      if (page !== 1) {
+        setPage(1);
+      } else {
+        setReloads(reloads + 1);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not clear the history');
+      setConfirming(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Panel
-      eyebrow="Archive"
-      title="Your uploads"
+      title="History"
       actions={
-        <Button variant="ghost" onClick={() => setReloads(reloads + 1)}>
-          Refresh
-        </Button>
+        <div className="actions">
+          {total > 0 && (
+            <Button
+              variant="link"
+              onClick={() => setConfirming(ALL)}
+              title="Delete every image in your history."
+            >
+              Clear all
+            </Button>
+          )}
+
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Refresh history"
+            title="Reload your history."
+            onClick={() => setReloads(reloads + 1)}
+          >
+            <RefreshCw size={16} strokeWidth={2} />
+          </button>
+        </div>
       }
     >
       {error !== null && <p className="notice">{error}</p>}
 
-      {images.length === 0 && error === null && <p className="status">Nothing uploaded yet.</p>}
+      {confirming !== null && (
+        <div className="confirm">
+          <p className="confirm-text">
+            {confirming === ALL
+              ? `Delete all ${total} images from your history? This cannot be undone.`
+              : 'Delete this image? This cannot be undone.'}
+          </p>
+
+          <div className="actions">
+            <Button
+              variant="primary"
+              disabled={busy}
+              onClick={() => void (confirming === ALL ? handleClear() : handleDelete(confirming))}
+            >
+              {busy ? 'Deleting...' : 'Delete'}
+            </Button>
+
+            <Button variant="ghost" disabled={busy} onClick={() => setConfirming(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {images.length === 0 && error === null && (
+        <p className="prose">Nothing here yet. Transformed images will appear here.</p>
+      )}
 
       <div className="grid">
         {images.map((image) => (
-          <article className="card" key={image.id}>
-            <img className="thumb" src={image.processedUrl ?? image.originalUrl} alt="" />
+          <figure className="cell" key={image.id}>
+            <img
+              className="thumb"
+              src={image.processedUrl ?? image.originalUrl}
+              alt=""
+              title={
+                image.processedUrl === null
+                  ? 'Transformed result is not ready yet, showing the original.'
+                  : 'Transformed result.'
+              }
+            />
 
-            <p className="meta small-caps">
-              <span>{image.status}</span>
-              <span>{Math.round(image.sizeBytes / 1024)} kB</span>
-            </p>
+            <figcaption className="caption tabular">
+              {image.status} &middot; {Math.round(image.sizeBytes / 1024)} kB
+            </figcaption>
 
-            <div className="card-actions">
-              <Button variant="ghost" onClick={() => void handleDownload(image.id, 'original')}>
-                Original
-              </Button>
+            <div className="cell-actions">
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Download the original"
+                title="Download the image exactly as you uploaded it."
+                onClick={() => void handleDownload(image.id, 'original')}
+              >
+                <ArrowDownToLine size={16} strokeWidth={2} />
+              </button>
 
               {image.processedUrl !== null && (
-                <Button variant="ghost" onClick={() => void handleDownload(image.id, 'processed')}>
-                  Result
-                </Button>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label="Download the transformed result"
+                  title="Download the transformed result."
+                  onClick={() => void handleDownload(image.id, 'processed')}
+                >
+                  <ImageDown size={16} strokeWidth={2} />
+                </button>
               )}
+
+              <button
+                type="button"
+                className="icon-btn icon-btn--danger"
+                aria-label="Remove from history"
+                title="Remove this image from your history."
+                onClick={() => setConfirming(image.id)}
+              >
+                <Trash size={16} strokeWidth={2} />
+              </button>
             </div>
-          </article>
+          </figure>
         ))}
       </div>
 
       {total > PAGE_SIZE && (
         <div className="pager">
-          <Button variant="outline" onClick={() => setPage(page - 1)} disabled={page <= 1}>
+          <Button
+            variant="outline"
+            onClick={() => setPage(page - 1)}
+            disabled={page <= 1}
+            title="Show the previous page of your history."
+          >
             Previous
           </Button>
 
-          <p className="small-caps">
+          <span className="label">
             Page {page} of {totalPages}
-          </p>
+          </span>
 
-          <Button variant="outline" onClick={() => setPage(page + 1)} disabled={page >= totalPages}>
+          <Button
+            variant="outline"
+            onClick={() => setPage(page + 1)}
+            disabled={page >= totalPages}
+            title="Show the next page of your history."
+          >
             Next
           </Button>
         </div>

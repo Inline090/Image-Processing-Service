@@ -1,56 +1,50 @@
-/* Design tokens — the single source of truth for the Serif design system.
-   Every colour here is contrast-checked against --background; see the notes on
-   the accent ramp for why gold is split into more than one token. */
+/* Design tokens — the single source of truth.
+   Warm cream ground, white cards, one apricot accent, generous rounding and
+   soft depth. Friendly and geometric rather than austere. */
 
 :root {
-  /* An ivory, light-only palette. This must be `light`, not `light dark`: the
-     form controls below have transparent backgrounds, so in an OS dark mode the
-     UA would paint their text light and it would vanish against the ivory. */
+  /* Light only. Must be `light` rather than `light dark`, so the browser does not
+     paint form-control text light in an OS dark mode. */
   color-scheme: light;
 
-  /* Surfaces. The canvas is a deeper warm greige than the specified ivory: at
-     #fafaf8 it sat within 2% of the white cards, so they never read as lifted.
-     The neutrals below step down from it in the same warm family. */
-  --background: #f1eee8;
+  /* Cream page, white cards. The warmth is what keeps it from feeling clinical. */
+  --background: #f7f4ee;
+  --surface: #ffffff;
+  --surface-hover: #faf8f4;
   --foreground: #1a1a1a;
-  --muted: #e9e5de;
-  /* Darker than the specified #6b6b6b, which only reaches 4.40:1 once the grain
-     multiplies over the canvas. The header's ghost button sits directly on that
-     surface, so it has to clear AA there and not just on the cards. */
-  --muted-foreground: #656565;
-  --card: #ffffff;
-  --border: #dcd6cc;
-  --border-hover: #c9c1b4;
+  --muted-foreground: #6b655c;
+  /* Disabled controls only — disabled text is exempt from contrast requirements. */
+  --subtle-foreground: #a8a29a;
+  /* Placeholders are real text and must clear 4.5:1 on white. */
+  --placeholder: #767068;
 
-  /* Accent.
-     On this canvas #b8860b measures only 2.81:1, so it is decorative only —
-     rules, card edges and large display type. It must not carry body-sized text,
-     and it is too weak even for the focus ring, which is why --ring uses the
-     stronger gold. Against white it is 3.25:1, so a white label on it fails AA.
-     --accent-strong carries every piece of text-bearing gold. It is dark enough
-     to survive the paper texture: 4.9:1 on the flat canvas, 4.7:1 once the grain
-     multiplies over it, and 5.7:1 against white. */
-  --accent: #b8860b;
-  --accent-strong: #856107;
-  --accent-hover: #946c09;
-  --accent-secondary: #d4a84b;
-  --accent-muted: rgba(184, 134, 11, 0.06);
-  --accent-foreground: #ffffff;
+  --border: #e8e3d9;
+  --border-strong: #d8d2c6;
 
-  /* Feedback. The previous #d1495b measured 4.17:1 on ivory, just under AA. */
-  --danger: #9c3a2e;
+  /* The apricot accent always sits behind dark text, which is exactly why it can
+     be this light and still pass: #1a1a1a on it measures 10.9:1. White on this
+     apricot would be about 1.9:1 and would fail badly. */
+  --accent: #f5c48a;
+  --accent-hover: #f0b673;
+  --accent-foreground: #1a1a1a;
+  --accent-soft: #fdf2e2;
 
-  /* Type */
-  --font-display: 'Playfair Display Variable', Georgia, 'Times New Roman', serif;
-  --font-body: 'Source Sans 3 Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --danger: #b42318;
+  --danger-quiet: rgba(180, 35, 24, 0.06);
 
-  --text-display: clamp(2.5rem, 6vw, 4.5rem);
-  --text-section: clamp(1.75rem, 3.5vw, 2.5rem);
-  --text-card: 1.25rem;
-  --text-body: 1rem;
-  --text-small: 0.875rem;
-  --text-label: 0.75rem;
+  /* Two faces: a geometric display for headings and buttons, a geometric sans
+     built for small text for everything else. */
+  --font-display: 'Poppins', system-ui, -apple-system, sans-serif;
+  --font-sans: 'DM Sans Variable', system-ui, -apple-system, sans-serif;
+
+  --text-heading: 1.75rem; /* 28px */
+  --text-title: 1.25rem; /* 20px */
+  --text-body: 1rem; /* 16px */
+  --text-control: 0.9375rem; /* 15px */
+  --text-label: 0.875rem; /* 14px */
+
+  --leading-tight: 1.25;
+  --leading-body: 1.6;
 
   /* Space */
   --space-1: 0.25rem;
@@ -60,37 +54,29 @@
   --space-5: 1.5rem;
   --space-6: 2rem;
   --space-8: 3rem;
-  --space-12: 5rem;
-
-  /* App rhythm. Deliberately far tighter than the design system's marketing
-     scale (its py-32 to py-44 would be 8-11rem between panels). */
-  --gap-panel: 1.25rem;
+  --space-section: 4rem;
 
   /* Layout */
-  --container: 64rem;
-  --measure: 26rem;
+  --container: 72rem;
+  --measure: 27rem; /* the sign-in card */
+  /* The wordmark lockup: the mark, the name and the rule beneath it. The header
+     band is built from this, and the brand mark is sized by it. */
+  --brand-block: 3.5rem;
 
-  /* Radii */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
+  /* Generous rounding. The card is the roundest thing on the page. */
+  --radius-sm: 8px;
+  --radius: 10px;
+  --radius-lg: 24px;
+  --radius-pill: 999px;
 
-  /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(26, 26, 26, 0.04);
-  --shadow-md: 0 4px 12px rgba(26, 26, 26, 0.06);
-  --shadow-lg: 0 8px 24px rgba(26, 26, 26, 0.08);
-  --shadow-accent: 0 2px 8px rgba(184, 134, 11, 0.25);
+  /* Depth is soft here rather than absent: one gentle shadow lifts the white
+     cards off the cream without turning into a glow. */
+  --shadow-card: 0 2px 16px rgba(26, 26, 26, 0.06);
+  --shadow-pop: 0 4px 20px rgba(26, 26, 26, 0.08);
 
-  /* Focus. The stronger gold, because --accent is only 2.81:1 on this canvas
-     and a focus ring needs 3:1. */
-  --ring: #856107;
+  /* On focus the border goes to ink and a soft apricot wash does the rest. */
+  --ring: #fdf2e2;
 
-  /* Motion */
   --ease: cubic-bezier(0.2, 0, 0, 1);
-  --duration: 200ms;
-
-  /* Paper texture strength. The design system asks for 30%, which is unusable on
-     a light canvas; at the 0.03 this started at the grain was not perceptible at
-     all. Tuned here to be visible without dirtying the page. Set to 0 to remove. */
-  --texture-opacity: 0.08;
+  --duration: 160ms;
 }

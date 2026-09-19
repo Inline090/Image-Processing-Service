@@ -1,4 +1,4 @@
-/* Base layer — reset, document typography, focus, motion and atmosphere. */
+/* Base layer — reset, typography, focus and motion. */
 
 *,
 *::before,
@@ -29,31 +29,99 @@ img {
 }
 
 body {
+  /* The top bar's band: the shell's top padding plus the wordmark lockup. Kept
+     beside the texture rules below, which leave this band clear. */
+  --header-band: calc(var(--space-6) + var(--brand-block));
+
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-body);
+  font-family: var(--font-sans);
   font-size: var(--text-body);
-  line-height: 1.75;
-  letter-spacing: 0.01em;
+  line-height: var(--leading-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Paper texture. A single fixed overlay rather than a repeating background on
-   every surface, so it never interacts with component backgrounds. The tile is
-   desaturated first: feTurbulence emits coloured static, which at any visible
-   opacity reads as RGB noise rather than paper. It is multiplied so it darkens
-   the canvas like grain in the sheet rather than sitting on it as grey paint.
-   Content sits above it (.shell is z-index 1), so opaque cards stay clean. */
+/* The signed-out screen carries the illustration. Setting it on body means it
+   paints the whole viewport through background propagation, so the image needs
+   no sized layer of its own. The drawing's cream is within a couple of points of
+   --background, so both screens still read as the same product rather than the
+   sign-in page looking like a separate site. */
+body:has(.shell--auth) {
+  background-image: url('../assets/signin-background.webp');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* The workspace is taller than the viewport, so the sign-in drawing cannot be one
+   cover image. It is reduced to its motifs instead - the wavy ink strokes, the
+   hollow circles, the ruled sheets and the dotted blocks - and tiled as a single
+   faint wash, so the page reads as the paper the product sits on rather than a
+   picture competing with the cards.
+
+   Only geometry is encoded below: a mask reads a shape's alpha, so the wash takes
+   its colour from --foreground and stays on the token system instead of
+   hard-coding an ink value. Drop the opacity to soften it, or a layer from the
+   list to thin it out. */
 body::before {
+  --paper-strokes: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='320'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round'%3E%3Cpath d='M36 54c10-15 21-15 31 0s21 15 31 0'/%3E%3Cpath d='M244 268c10-15 21-15 31 0s21 15 31 0'/%3E%3Ccircle cx='318' cy='66' r='5.5'/%3E%3Ccircle cx='104' cy='214' r='3.5'/%3E%3C/g%3E%3C/svg%3E");
+  --paper-sheets: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='560' height='420'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.5'%3E%3Crect x='76' y='104' width='132' height='92' rx='2'/%3E%3Cpath d='M98 138h88M98 160h62'/%3E%3Ccircle cx='466' cy='332' r='5'/%3E%3C/g%3E%3C/svg%3E");
+  --paper-dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='360'%3E%3Cg fill='none' stroke='%23000' stroke-width='5' stroke-linecap='round' stroke-dasharray='0 15'%3E%3Cpath d='M300 150v75'/%3E%3Cpath d='M315 150v75'/%3E%3Cpath d='M330 150v75'/%3E%3C/g%3E%3C/svg%3E");
+
   content: '';
   position: fixed;
   inset: 0;
-  z-index: 0;
+  z-index: -1;
   pointer-events: none;
-  opacity: var(--texture-opacity);
-  mix-blend-mode: multiply;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+
+  background-color: var(--foreground);
+  opacity: 0.22;
+
+  -webkit-mask-image: var(--paper-strokes), var(--paper-sheets), var(--paper-dots);
+  mask-image: var(--paper-strokes), var(--paper-sheets), var(--paper-dots);
+
+  /* Coprime tile sizes with offset origins, so the three motifs do not line up
+     into a visible grid as the page scrolls. */
+  -webkit-mask-size:
+    420px 320px,
+    560px 420px,
+    480px 360px;
+  mask-size:
+    420px 320px,
+    560px 420px,
+    480px 360px;
+  -webkit-mask-position:
+    0 0,
+    190px 140px,
+    110px 260px;
+  mask-position:
+    0 0,
+    190px 140px,
+    110px 260px;
+  -webkit-mask-repeat: repeat;
+  mask-repeat: repeat;
+}
+
+/* The header sits on plain ground rather than on the wash. This paints the page
+   colour back over the band and eases out across the gutter beneath it, so the
+   pattern is introduced below the bar instead of being cut off mid-motif. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: calc(var(--header-band) + var(--space-8));
+  z-index: -1;
+  pointer-events: none;
+
+  background: linear-gradient(to bottom, var(--background) var(--header-band), transparent);
+}
+
+/* The illustration is the whole ground on the signed-out screen, so neither the
+   wash nor its cover belongs there. */
+body:has(.shell--auth)::before,
+body:has(.shell--auth)::after {
+  display: none;
 }
 
 h1,
@@ -61,43 +129,65 @@ h2,
 h3 {
   font-family: var(--font-display);
   font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.15;
+  letter-spacing: -0.01em;
+  line-height: var(--leading-tight);
 }
 
-/* The small-caps label. This is the design system's signature supporting type:
-   tracked uppercase monospace, used for eyebrows, meta and field labels.
-   Rendered in --accent-strong, because the specified gold is only 2.81:1 on the
-   canvas and would fail AA at this size.
+h1 {
+  font-size: var(--text-heading);
+}
 
-   --label-size lets a caller scale it up into a display-scale descriptor while
-   keeping the treatment itself single-sourced. */
-.small-caps {
-  font-family: var(--font-mono);
-  font-size: var(--label-size, var(--text-label));
+h2 {
+  font-size: var(--text-title);
+}
+
+h3 {
+  font-size: var(--text-body);
+}
+
+.label {
+  font-size: var(--text-label);
   font-weight: 500;
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
-  line-height: 1.4;
+  color: var(--muted-foreground);
 }
 
-/* Warm ambient wash, used behind the signed-out card only. */
-.glow {
-  position: relative;
-  isolation: isolate;
+/* Secondary reading text: the sign-in line, empty states. */
+.prose {
+  font-size: var(--text-body);
+  line-height: 1.6;
+  color: var(--muted-foreground);
 }
 
-.glow::before {
-  content: '';
+/* Values that change — dimensions, sizes, ids — must not shift width as they do. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.hairline {
+  height: 1px;
+  background: var(--border);
+}
+
+/* Keeps a label in the accessibility tree while removing it visually — used
+   where a placeholder carries the hint and the field is self-evident. */
+.sr-only {
   position: absolute;
-  inset: -25% -15%;
-  z-index: -1;
-  pointer-events: none;
-  background: radial-gradient(55% 55% at 50% 45%, var(--accent-muted), transparent 70%);
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+::placeholder {
+  color: var(--placeholder);
 }
 
 :focus-visible {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--foreground);
   outline-offset: 2px;
 }
 

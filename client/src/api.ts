@@ -8,6 +8,8 @@ export type Image = {
   createdAt: string;
   originalUrl: string;
   processedUrl: string | null;
+  /** True when the history was full, so this one is not kept there. */
+  ephemeral: boolean;
 };
 
 export type Job = {
@@ -33,15 +35,21 @@ export type WatermarkPosition =
   | 'south'
   | 'southeast';
 
+export type OutputFormat = 'jpeg' | 'png' | 'webp' | 'avif';
+
+/** What a resize keeps when it has to discard part of the image. */
+export type CropFocus = 'center' | 'attention' | 'entropy';
+
 export type TransformOptions = {
   width?: number;
   height?: number;
   fit?: 'cover' | 'contain' | 'fill' | 'inside' | 'outside';
+  focus?: CropFocus;
   rotate?: number;
   crop?: { left: number; top: number; width: number; height: number };
   grayscale?: boolean;
   sepia?: boolean;
-  format?: 'jpeg' | 'png' | 'webp';
+  format?: OutputFormat;
   watermark?: { text: string; position?: WatermarkPosition };
   modulate?: {
     brightness?: number;
@@ -64,6 +72,7 @@ export type TransformOptions = {
   background?: string;
   flatten?: boolean;
   quality?: number;
+  effort?: number;
 };
 
 const TOKEN_KEY = 'ips.token';
@@ -86,6 +95,19 @@ export function setToken(value: string | null): void {
 
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
   unauthorizedHandler = handler;
+}
+
+// The server caps a guest account, but starting a fresh guest session would
+// hand out a new allowance. Remembering that this browser has spent its guest
+// quota is what keeps the cap meaningful; registering is the way forward.
+const GUEST_EXHAUSTED_KEY = 'ips.guestExhausted';
+
+export function isGuestExhausted(): boolean {
+  return localStorage.getItem(GUEST_EXHAUSTED_KEY) !== null;
+}
+
+export function markGuestExhausted(): void {
+  localStorage.setItem(GUEST_EXHAUSTED_KEY, '1');
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -177,4 +199,39 @@ export async function getDownload(id: string, variant: DownloadVariant): Promise
   const result = await request<{ download: Download }>(`/images/${id}/download?variant=${variant}`);
 
   return result.download;
+}
+
+export async function deleteImage(id: string): Promise<number> {
+  const result = await request<{ deleted: number }>(`/images/${id}`, { method: 'DELETE' });
+  return result.deleted;
+}
+
+export async function clearImages(): Promise<number> {
+  const result = await request<{ deleted: number }>('/images', { method: 'DELETE' });
+  return result.deleted;
+}
+
+export type Account = {
+  id: string;
+  email: string;
+  createdAt: string;
+  guest: boolean;
+  /** null for a registered account, which is not capped. */
+  uploadLimit: number | null;
+  /** How much of the guest allowance has been spent. Deleting history does not lower it. */
+  uploadsUsed: number;
+};
+
+export async function getMe(): Promise<Account> {
+  const result = await request<{ user: Account }>('/auth/me');
+  return result.user;
+}
+
+export async function signInAsGuest(): Promise<Account> {
+  const result = await request<{ token: string; user: Account }>('/auth/guest', {
+    method: 'POST',
+  });
+
+  setToken(result.token);
+  return result.user;
 }
