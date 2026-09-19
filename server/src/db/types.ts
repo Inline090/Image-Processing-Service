@@ -5,9 +5,18 @@ export type JobStatus = 'pending' | 'processing' | 'ready' | 'failed';
 export type UserRow = {
   id: string;
   email: string;
-  password_hash: string;
+  /** Null for an account that only signs in through a provider. */
+  password_hash: string | null;
   is_guest: boolean;
   guest_upload_count: number;
+  created_at: Date;
+};
+
+export type OAuthAccountRow = {
+  id: string;
+  user_id: string;
+  provider: string;
+  provider_id: string;
   created_at: Date;
 };
 

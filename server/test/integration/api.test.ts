@@ -6,36 +6,51 @@ import { config } from '../../src/config.js';
 import { pool } from '../../src/db/pool.js';
 import { signToken } from '../../src/utils/jwt.js';
 
+// Signing a url needs credentials even though nothing here talks to AWS: the
+// signature is computed locally from the key. Placeholders keep the suite runnable
+// on a machine with no AWS setup, and real values from the environment win.
+process.env.AWS_ACCESS_KEY_ID ??= 'test-placeholder';
+process.env.AWS_SECRET_ACCESS_KEY ??= 'test-placeholder';
+process.env.AWS_EC2_METADATA_DISABLED ??= 'true';
+
 const runId = Date.now();
 const emailA = `test-a-${runId}@example.com`;
 const emailB = `test-b-${runId}@example.com`;
 const emailC = `test-c-${runId}@example.com`;
-const password = 'hunter2hunter2';
 
 let server: Server;
 let baseUrl: string;
-
-function jsonRequest(body: unknown, token?: string): RequestInit {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-
-  if (token !== undefined) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
-  return { method: 'POST', headers, body: JSON.stringify(body) };
-}
 
 function authed(token: string): RequestInit {
   return { headers: { Authorization: `Bearer ${token}` } };
 }
 
-async function registerAndLogin(email: string): Promise<string> {
-  await fetch(`${baseUrl}/api/auth/register`, jsonRequest({ email, password }));
+/**
+ * A token for a test account, made here rather than by signing in.
+ *
+ * Signing in is the one thing this suite cannot do: the only way in is a provider, and
+ * that needs a real account and a network. The caller is created on first use, so any
+ * test can ask for the same address without worrying about the order it runs in.
+ */
+async function tokenFor(email: string): Promise<string> {
+  const existing = await pool.query<{ id: string }>('SELECT id FROM users WHERE email = $1', [
+    email,
+  ]);
 
-  const response = await fetch(`${baseUrl}/api/auth/login`, jsonRequest({ email, password }));
-  const body = (await response.json()) as { token: string };
+  const created =
+    existing.rows[0] === undefined
+      ? await pool.query<{ id: string }>('INSERT INTO users (email) VALUES ($1) RETURNING id', [
+          email,
+        ])
+      : existing;
 
-  return body.token;
+  const id = created.rows[0]?.id;
+
+  if (id === undefined) {
+    throw new Error(`No user for ${email}`);
+  }
+
+  return signToken({ sub: id, email });
 }
 
 async function findUserId(email: string): Promise<string> {
@@ -88,80 +103,7 @@ after(async () => {
   }
 });
 
-describe('auth', () => {
-  it('registers a new user', async () => {
-    const response = await fetch(
-      `${baseUrl}/api/auth/register`,
-      jsonRequest({ email: emailA, password }),
-    );
-
-    assert.equal(response.status, 201);
-  });
-
-  it('rejects a second registration for the same email', async () => {
-    const response = await fetch(
-      `${baseUrl}/api/auth/register`,
-      jsonRequest({ email: emailA, password }),
-    );
-    const body = (await response.json()) as { error: { message: string } };
-
-    assert.equal(response.status, 409);
-    assert.equal(body.error.message, 'An account with that email already exists');
-  });
-
-  it('rejects a password under eight characters', async () => {
-    const response = await fetch(
-      `${baseUrl}/api/auth/register`,
-      jsonRequest({ email: `short-${runId}@example.com`, password: 'short' }),
-    );
-
-    assert.equal(response.status, 400);
-  });
-
-  it('rejects a malformed email', async () => {
-    const response = await fetch(
-      `${baseUrl}/api/auth/register`,
-      jsonRequest({ email: 'not-an-email', password }),
-    );
-
-    assert.equal(response.status, 400);
-  });
-
-  it('logs in and returns a token', async () => {
-    const response = await fetch(
-      `${baseUrl}/api/auth/login`,
-      jsonRequest({ email: emailA, password }),
-    );
-    const body = (await response.json()) as { token: string };
-
-    assert.equal(response.status, 200);
-    assert.ok(body.token.length > 20);
-  });
-
-  it('rejects the wrong password', async () => {
-    const response = await fetch(
-      `${baseUrl}/api/auth/login`,
-      jsonRequest({ email: emailA, password: 'definitely-wrong' }),
-    );
-
-    assert.equal(response.status, 401);
-  });
-
-  it('answers identically for an unknown email and a wrong password', async () => {
-    const unknownEmail = await fetch(
-      `${baseUrl}/api/auth/login`,
-      jsonRequest({ email: `nobody-${runId}@example.com`, password }),
-    );
-    const wrongPassword = await fetch(
-      `${baseUrl}/api/auth/login`,
-      jsonRequest({ email: emailA, password: 'definitely-wrong' }),
-    );
-
-    assert.equal(unknownEmail.status, 401);
-    assert.equal(wrongPassword.status, 401);
-    assert.deepEqual(await unknownEmail.json(), await wrongPassword.json());
-  });
-
+describe('account details', () => {
   it('rejects /me without a token', async () => {
     const response = await fetch(`${baseUrl}/api/auth/me`);
 
@@ -169,7 +111,7 @@ describe('auth', () => {
   });
 
   it('returns the signed-in user from /me', async () => {
-    const token = await registerAndLogin(emailB);
+    const token = await tokenFor(emailB);
     const response = await fetch(`${baseUrl}/api/auth/me`, authed(token));
     const body = (await response.json()) as { user: { email: string } };
 
@@ -183,8 +125,8 @@ describe('image listing', () => {
   let tokenB = '';
 
   before(async () => {
-    tokenA = await registerAndLogin(emailA);
-    tokenB = await registerAndLogin(emailB);
+    tokenA = await tokenFor(emailA);
+    tokenB = await tokenFor(emailB);
 
     await seedImages(await findUserId(emailA), 3);
     await seedImages(await findUserId(emailB), 1);
@@ -238,7 +180,7 @@ describe('downloads', () => {
   let processedId = '';
 
   before(async () => {
-    token = await registerAndLogin(emailC);
+    token = await tokenFor(emailC);
     const userId = await findUserId(emailC);
 
     const original = await pool.query<{ id: string }>(
@@ -308,7 +250,7 @@ describe('downloads', () => {
   });
 
   it('hides an image that belongs to somebody else', async () => {
-    const otherToken = await registerAndLogin(emailA);
+    const otherToken = await tokenFor(emailA);
     const response = await fetch(
       `${baseUrl}/api/images/${originalId}/download`,
       authed(otherToken),
@@ -323,15 +265,7 @@ describe('deleting', () => {
   let userId = '';
 
   before(async () => {
-    // Signing in rather than registering: the register+login pair shares one
-    // rate-limit budget with every other auth request in this file.
-    const response = await fetch(
-      `${baseUrl}/api/auth/login`,
-      jsonRequest({ email: emailC, password }),
-    );
-    const body = (await response.json()) as { token: string };
-
-    token = body.token;
+    token = await tokenFor(emailC);
     userId = await findUserId(emailC);
   });
 
@@ -543,17 +477,9 @@ describe('history limit', () => {
   let scratchId = '';
 
   before(async () => {
-    // Inserted directly and given a token rather than going through
-    // /auth/register: the register and login pair share one rate-limit budget
-    // with every other auth request in this file, and this block only needs a
-    // caller whose listing is empty to start with.
-    const { rows } = await pool.query<{ id: string }>(
-      'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id',
-      [email, 'not-a-real-hash'],
-    );
-
-    userId = rows[0]?.id ?? '';
-    token = signToken({ sub: userId, email });
+    // A caller whose listing is empty to start with, which is all this block needs.
+    token = await tokenFor(email);
+    userId = await findUserId(email);
   });
 
   after(async () => {
