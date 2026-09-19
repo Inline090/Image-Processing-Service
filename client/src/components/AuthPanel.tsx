@@ -1,5 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { login, register } from '../api';
+import { Button } from './ui/Button';
+import { Field } from './ui/Field';
+import { Panel } from './ui/Panel';
 
 type Mode = 'login' | 'register';
 
@@ -41,41 +44,41 @@ export function AuthPanel({ onSignedIn }: Props) {
   }
 
   return (
-    <section className="panel">
-      <h2>{mode === 'login' ? 'Sign in' : 'Create an account'}</h2>
-
+    <Panel title={mode === 'login' ? 'Sign in' : 'Create an account'} accentTop>
       <form onSubmit={handleSubmit}>
-        <label>
-          Email
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-        </label>
+        <div className="group">
+          <Field label="Email">
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+          </Field>
 
-        <label>
-          Password
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            minLength={8}
-            required
-          />
-        </label>
+          <Field label="Password">
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              minLength={8}
+              required
+            />
+          </Field>
+        </div>
 
-        <button type="submit" disabled={busy}>
-          {busy ? 'Working...' : mode === 'login' ? 'Sign in' : 'Sign up'}
-        </button>
+        {error !== null && <p className="notice">{error}</p>}
+
+        <div className="group">
+          <Button type="submit" variant="primary" disabled={busy}>
+            {busy ? 'Working...' : mode === 'login' ? 'Sign in' : 'Sign up'}
+          </Button>
+
+          <Button variant="ghost" onClick={toggleMode}>
+            {mode === 'login' ? 'Need an account? Register' : 'Already registered? Sign in'}
+          </Button>
+        </div>
       </form>
-
-      {error !== null && <p className="error">{error}</p>}
-
-      <button type="button" className="link" onClick={toggleMode}>
-        {mode === 'login' ? 'Need an account? Register' : 'Already registered? Sign in'}
-      </button>
-    </section>
+    </Panel>
   );
 }

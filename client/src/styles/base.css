@@ -1,0 +1,112 @@
+/* Base layer — reset, document typography, focus, motion and atmosphere. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body,
+h1,
+h2,
+h3,
+p,
+figure,
+fieldset,
+legend {
+  margin: 0;
+}
+
+fieldset {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  line-height: 1.75;
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Paper texture. A single fixed overlay rather than a repeating background on
+   every surface, so it never interacts with component backgrounds. The tile is
+   desaturated first: feTurbulence emits coloured static, which at any visible
+   opacity reads as RGB noise rather than paper. It is multiplied so it darkens
+   the canvas like grain in the sheet rather than sitting on it as grey paint.
+   Content sits above it (.shell is z-index 1), so opaque cards stay clean. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--texture-opacity);
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+/* The small-caps label. This is the design system's signature supporting type:
+   tracked uppercase monospace, used for eyebrows, meta and field labels.
+   Rendered in --accent-strong, because the specified gold is only 2.81:1 on the
+   canvas and would fail AA at this size.
+
+   --label-size lets a caller scale it up into a display-scale descriptor while
+   keeping the treatment itself single-sourced. */
+.small-caps {
+  font-family: var(--font-mono);
+  font-size: var(--label-size, var(--text-label));
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+
+/* Warm ambient wash, used behind the signed-out card only. */
+.glow {
+  position: relative;
+  isolation: isolate;
+}
+
+.glow::before {
+  content: '';
+  position: absolute;
+  inset: -25% -15%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(55% 55% at 50% 45%, var(--accent-muted), transparent 70%);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

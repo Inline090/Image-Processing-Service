@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { hasToken, setToken, setUnauthorizedHandler } from './api';
+import logo from './assets/logo.png';
 import { AuthPanel } from './components/AuthPanel';
 import { GalleryPanel } from './components/GalleryPanel';
 import { JobStatus } from './components/JobStatus';
 import { UploadPanel } from './components/UploadPanel';
+import { Button } from './components/ui/Button';
 
 export default function App() {
   const [signedIn, setSignedIn] = useState(hasToken());
@@ -30,30 +32,40 @@ export default function App() {
 
   if (!signedIn) {
     return (
-      <main>
-        <header>
-          <h1>Image Processing Service</h1>
-        </header>
+      <main className="shell">
+        <div className="auth glow">
+          <header className="auth-intro">
+            <img className="auth-mark" src={logo} alt="" />
+            <p className="small-caps">Image Editor</p>
+            <h1 className="auth-brand">Lumina</h1>
+          </header>
 
-        {expired && <p className="error">Your session expired - please sign in again.</p>}
+          {expired && <p className="notice">Your session expired - please sign in again.</p>}
 
-        <AuthPanel
-          onSignedIn={() => {
-            setSignedIn(true);
-            setExpired(false);
-          }}
-        />
+          <div className="auth-card">
+            <AuthPanel
+              onSignedIn={() => {
+                setSignedIn(true);
+                setExpired(false);
+              }}
+            />
+          </div>
+        </div>
       </main>
     );
   }
 
   return (
-    <main>
-      <header>
-        <h1>Image Processing Service</h1>
-        <button type="button" className="link" onClick={signOut}>
+    <main className="shell">
+      <header className="shell-header">
+        <div className="brand">
+          <img className="brand-mark" src={logo} alt="" />
+          <h1 className="wordmark">Lumina</h1>
+        </div>
+
+        <Button variant="ghost" onClick={signOut}>
           Sign out
-        </button>
+        </Button>
       </header>
 
       <UploadPanel onJobQueued={setActiveJobId} />

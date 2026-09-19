@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { getJob, type DownloadVariant, type Job } from '../api';
 import { downloadImage } from '../download';
 import { startPolling } from '../poll';
+import { Button } from './ui/Button';
+import { Panel } from './ui/Panel';
 
 const PROGRESS: Record<Job['status'], number> = {
   pending: 5,
@@ -48,48 +50,58 @@ export function JobStatus({ jobId }: Props) {
 
   if (error !== null) {
     return (
-      <section className="panel">
-        <h2>Transform job</h2>
-        <p className="error">{error}</p>
-      </section>
+      <Panel eyebrow="Result" title="Transform job" accentTop>
+        <p className="notice">{error}</p>
+      </Panel>
     );
   }
 
   return (
-    <section className="panel">
-      <h2>Transform job</h2>
-
+    <Panel
+      eyebrow="Result"
+      title="Transform job"
+      accentTop
+      actions={job !== null ? <p className="small-caps">{job.status}</p> : undefined}
+    >
       {job === null ? (
         <p className="status">Waiting for the first update...</p>
       ) : (
-        <>
+        <div className="group">
           <p className="status">
-            <code>{job.id.slice(0, 8)}</code> - <strong>{job.status}</strong>
-            {job.attempts > 0 && ` (attempt ${job.attempts})`}
+            <code className="mono">{job.id.slice(0, 8)}</code>
+            {job.attempts > 0 ? ` - attempt ${job.attempts}` : ''}
           </p>
 
           <div className="progress">
             <div className="progress-bar" style={{ width: `${PROGRESS[job.status]}%` }} />
           </div>
 
-          {job.error !== null && <p className="error">{job.error}</p>}
+          {job.error !== null && <p className="notice">{job.error}</p>}
 
           {job.processedUrl !== null && (
-            <>
+            <div className="group">
+              {job.width !== null && job.height !== null && (
+                <p className="dimensions">
+                  {job.width} &times; {job.height}
+                </p>
+              )}
+
               <img className="preview" src={job.processedUrl} alt="Transformed result" />
-              <button
-                type="button"
-                className="link"
-                onClick={() => void handleDownload(job.imageId, 'processed')}
-              >
-                Download result
-              </button>
-            </>
+
+              <div className="actions">
+                <Button
+                  variant="ghost"
+                  onClick={() => void handleDownload(job.imageId, 'processed')}
+                >
+                  Download result
+                </Button>
+              </div>
+            </div>
           )}
 
-          {downloadError !== null && <p className="error">{downloadError}</p>}
-        </>
+          {downloadError !== null && <p className="notice">{downloadError}</p>}
+        </div>
       )}
-    </section>
+    </Panel>
   );
 }

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { listImages, type DownloadVariant, type Image } from '../api';
 import { downloadImage } from '../download';
+import { Button } from './ui/Button';
+import { Panel } from './ui/Panel';
 
 const PAGE_SIZE = 6;
 
@@ -49,42 +51,38 @@ export function GalleryPanel() {
   }
 
   return (
-    <section className="panel">
-      <header className="panel-header">
-        <h2>Your uploads</h2>
-        <button type="button" className="link" onClick={() => setReloads(reloads + 1)}>
+    <Panel
+      eyebrow="Archive"
+      title="Your uploads"
+      actions={
+        <Button variant="ghost" onClick={() => setReloads(reloads + 1)}>
           Refresh
-        </button>
-      </header>
-
-      {error !== null && <p className="error">{error}</p>}
+        </Button>
+      }
+    >
+      {error !== null && <p className="notice">{error}</p>}
 
       {images.length === 0 && error === null && <p className="status">Nothing uploaded yet.</p>}
 
       <div className="grid">
         {images.map((image) => (
           <article className="card" key={image.id}>
-            <img className="thumb" src={image.processedUrl ?? image.originalUrl} alt="Upload" />
-            <p className="meta">
-              <strong>{image.status}</strong>
+            <img className="thumb" src={image.processedUrl ?? image.originalUrl} alt="" />
+
+            <p className="meta small-caps">
+              <span>{image.status}</span>
               <span>{Math.round(image.sizeBytes / 1024)} kB</span>
             </p>
+
             <div className="card-actions">
-              <button
-                type="button"
-                className="link"
-                onClick={() => void handleDownload(image.id, 'original')}
-              >
+              <Button variant="ghost" onClick={() => void handleDownload(image.id, 'original')}>
                 Original
-              </button>
+              </Button>
+
               {image.processedUrl !== null && (
-                <button
-                  type="button"
-                  className="link"
-                  onClick={() => void handleDownload(image.id, 'processed')}
-                >
+                <Button variant="ghost" onClick={() => void handleDownload(image.id, 'processed')}>
                   Result
-                </button>
+                </Button>
               )}
             </div>
           </article>
@@ -93,17 +91,19 @@ export function GalleryPanel() {
 
       {total > PAGE_SIZE && (
         <div className="pager">
-          <button type="button" onClick={() => setPage(page - 1)} disabled={page <= 1}>
+          <Button variant="outline" onClick={() => setPage(page - 1)} disabled={page <= 1}>
             Previous
-          </button>
-          <span className="status">
+          </Button>
+
+          <p className="small-caps">
             Page {page} of {totalPages}
-          </span>
-          <button type="button" onClick={() => setPage(page + 1)} disabled={page >= totalPages}>
+          </p>
+
+          <Button variant="outline" onClick={() => setPage(page + 1)} disabled={page >= totalPages}>
             Next
-          </button>
+          </Button>
         </div>
       )}
-    </section>
+    </Panel>
   );
 }

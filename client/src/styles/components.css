@@ -1,0 +1,577 @@
+/* Component layer — the app's semantic classes, built entirely from tokens. */
+
+/* ── Shell ─────────────────────────────────────────────────────────────── */
+
+.shell {
+  position: relative;
+  z-index: 1; /* clears the fixed paper-texture overlay */
+  max-width: var(--container);
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4) var(--space-12);
+}
+
+.shell-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-6);
+  border-bottom: 1px solid var(--border);
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* Decorative: the wordmark beside it already carries the name, so alt is empty. */
+.brand-mark {
+  height: 30px;
+  width: auto;
+}
+
+/* ── Signed-out screen ─────────────────────────────────────────────────── */
+
+/* Sits under .shell, so the signed-out screen's total top offset is these two
+   stacked. It was 5rem here on top of 2rem there, which pushed the lockup a
+   long way down the viewport. */
+.auth {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-8) var(--space-2) var(--space-8);
+}
+
+/* Groups the descriptor and the wordmark into one lockup, so the wider gap on
+   .auth separates the brand from the card rather than splitting the lockup. */
+.auth-intro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--accent-strong);
+  /* Scales the inherited .small-caps label from a 12px eyebrow into a
+     display-size descriptor, so it stands with the wordmark instead of
+     whispering under it. */
+  --label-size: clamp(1.125rem, 2.2vw, 1.5rem);
+}
+
+/* The mark leads the lockup, at a size the 147x127 source still holds up at. */
+.auth-mark {
+  height: 64px;
+  width: auto;
+}
+
+/* The wordmark carries the signed-out screen on its own now. */
+.auth-brand {
+  font-size: var(--text-display);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--foreground);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: var(--measure);
+}
+
+/* ── Panels ────────────────────────────────────────────────────────────── */
+
+.panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-6);
+}
+
+.panel + .panel {
+  margin-top: var(--gap-panel);
+}
+
+/* The 2px gold edge is reserved for the two featured surfaces. */
+.panel--accent {
+  border-top: 2px solid var(--accent);
+}
+
+.panel-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-title {
+  font-size: var(--text-card);
+  font-weight: 600;
+}
+
+.panel-lede {
+  color: var(--muted-foreground);
+  font-size: var(--text-small);
+}
+
+/* ── Forms ─────────────────────────────────────────────────────────────── */
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+fieldset + fieldset {
+  margin-top: var(--space-6);
+}
+
+/* Legend is styled rather than made a flex child, because legend has
+   special-cased layout behaviour inside flex and grid containers. */
+legend {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+  padding: 0;
+  margin-bottom: var(--space-4);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Two-or-more column field grid that reflows to a single column when narrow. */
+.pairs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: var(--space-4);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.field-label {
+  color: var(--muted-foreground);
+}
+
+/* The custom controls below are excluded here and styled on their own. */
+.field input:not([type='checkbox']):not(.file-input):not(.color-input),
+.field select {
+  font: inherit;
+  font-family: var(--font-body);
+  color: var(--foreground);
+  background: transparent;
+  min-height: 3rem;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  touch-action: manipulation;
+  transition:
+    border-color 150ms var(--ease),
+    background-color 150ms var(--ease);
+}
+
+.field input:not([type='checkbox']):hover,
+.field select:hover {
+  border-color: var(--border-hover);
+}
+
+.field input::placeholder {
+  color: var(--muted-foreground);
+  opacity: 0.65;
+}
+
+/* .color-input is excluded: this rule is more specific than its own opacity:0,
+   so without the exclusion a disabled colour input would render its native
+   swatch at 50% and show a square through the wheel. Its disabled look comes
+   from the :disabled + .color-wheel rule instead. */
+.field input:disabled:not(.color-input),
+.field select:disabled {
+  opacity: 0.5;
+}
+
+.inline {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-small);
+  cursor: pointer;
+}
+
+.inline input[type='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--accent-strong);
+  touch-action: manipulation;
+}
+
+/* A native file input draws its own button plus a "No file chosen" string that
+   CSS cannot reach, so it reads as a browser widget dropped into the page. The
+   real input is hidden but stays focusable, and this label is the control. */
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.file-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 3rem;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    border-color 150ms var(--ease),
+    background-color 150ms var(--ease);
+}
+
+.file-field:hover {
+  border-color: var(--border-hover);
+  background: var(--muted);
+}
+
+/* Stands in for the focus ring the hidden input cannot draw. */
+.file-field:focus-within {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  min-height: 1.9rem;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--foreground);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-small);
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  transition: border-color var(--duration) var(--ease);
+}
+
+/* Only the border shifts to gold: gold text on the muted fill measures 4.24:1,
+   under AA for text, so the chip's colour stays inherited. */
+.file-field:hover .file-chip {
+  border-color: var(--accent-strong);
+}
+
+.file-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-small);
+  color: var(--muted-foreground);
+}
+
+/* The native colour swatch is a small square that reads as a browser widget.
+   The visible control is a full-spectrum circle; the real input shares the same
+   box, transparent but still clickable and reachable by keyboard. */
+.color-field {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  width: 3rem;
+  height: 3rem;
+}
+
+.color-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.color-wheel {
+  pointer-events: none; /* lets the click fall through to the input beneath */
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: conic-gradient(
+    from 180deg,
+    #e5484d,
+    #f5a524,
+    #f2e14c,
+    #46d17a,
+    #3fb9d4,
+    #5b6ee1,
+    #b45bd6,
+    #e5484d
+  );
+  transition:
+    transform var(--duration) var(--ease),
+    box-shadow var(--duration) var(--ease);
+}
+
+.color-field:hover .color-wheel {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+/* Ring the wheel, not .color-field: the wrapper is an unrounded box, so an
+   outline on it would draw a square around the circle. */
+.color-field:focus-within .color-wheel {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Placed after the input in the DOM so this sibling selector can reach it. */
+.color-input:disabled + .color-wheel {
+  opacity: 0.5;
+  transform: none;
+  box-shadow: none;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font: inherit;
+  font-family: var(--font-body);
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  min-height: 2.75rem; /* 44px touch target */
+  padding: 0 var(--space-5);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background-color var(--duration) var(--ease),
+    border-color var(--duration) var(--ease),
+    color var(--duration) var(--ease),
+    box-shadow var(--duration) var(--ease),
+    transform var(--duration) var(--ease);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.btn--primary {
+  background: var(--accent-strong);
+  color: var(--accent-foreground);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: var(--shadow-accent);
+  transform: translateY(-1px);
+}
+
+.btn--primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn--outline {
+  background: transparent;
+  border-color: var(--foreground);
+  color: var(--foreground);
+}
+
+/* Text stays foreground here: gold on the muted fill only reaches 4.24:1, which
+   is under AA for body-sized text. The gold moves to the border, where it only
+   has to clear the 3:1 non-text threshold. */
+.btn--outline:hover:not(:disabled) {
+  background: var(--muted);
+  border-color: var(--accent-strong);
+  color: var(--foreground);
+}
+
+/* The quiet, editorial action: text only until hovered. */
+.btn--ghost {
+  background: none;
+  border-color: transparent;
+  padding: 0 var(--space-1);
+  color: var(--muted-foreground);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 4px;
+}
+
+.btn--ghost:hover:not(:disabled) {
+  color: var(--foreground);
+  text-decoration-color: var(--accent);
+}
+
+/* ── Feedback ──────────────────────────────────────────────────────────── */
+
+.notice {
+  color: var(--danger);
+  background: var(--muted);
+  border-left: 2px solid var(--danger);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-small);
+}
+
+.status {
+  color: var(--muted-foreground);
+  font-size: var(--text-small);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+/* Serif display figures, for output dimensions and page counts. */
+.dimensions {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+.progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--muted);
+  overflow: hidden;
+  margin: var(--space-4) 0;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--accent-strong);
+  transition: width var(--duration) var(--ease);
+}
+
+.preview {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-top: var(--space-3);
+}
+
+/* ── Gallery ───────────────────────────────────────────────────────────── */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: var(--space-4);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition:
+    border-color var(--duration) var(--ease),
+    box-shadow var(--duration) var(--ease);
+}
+
+.card:hover {
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow-md);
+}
+
+/* aspect-ratio reserves the box before the image loads, which prevents the
+   gallery reflowing as thumbnails arrive. */
+.thumb {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--muted);
+}
+
+.meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  color: var(--muted-foreground);
+}
+
+.card-actions {
+  display: flex;
+  gap: var(--space-4);
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+/* ── Narrow screens ────────────────────────────────────────────────────── */
+
+@media (max-width: 40rem) {
+  .shell {
+    padding: var(--space-5) var(--space-4) var(--space-8);
+  }
+
+  .shell-header {
+    align-items: center;
+  }
+
+  .panel {
+    padding: var(--space-4);
+  }
+
+  .card-actions {
+    gap: var(--space-2);
+  }
+}
