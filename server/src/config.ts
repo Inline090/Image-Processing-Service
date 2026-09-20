@@ -98,3 +98,12 @@ export const config = {
   // never one taken from the request, or the callback would be an open redirect.
   clientUrl: optional('CLIENT_URL', 'http://localhost:5173'),
 } as const;
+
+/**
+ * The most images one bulk request may carry.
+ *
+ * Bounded so a single request cannot queue a large amount of work at once, and so the
+ * bulk limiter can be measured in the same unit as the single-image one: three batches
+ * of ten is the same thirty images per window that the transform route allows.
+ */
+export const MAX_BULK_IMAGES = 10;

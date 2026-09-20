@@ -6,6 +6,8 @@ export type NewJob = {
   userId: string;
   options: unknown;
   optionsHash: string;
+  /** Shared by every job of one bulk request; null for a single transform. */
+  batchId?: string | null;
 };
 
 /**
@@ -20,18 +22,36 @@ export async function createJob({
   userId,
   options,
   optionsHash,
+  batchId = null,
 }: NewJob): Promise<JobRow | null> {
   const { rows } = await pool.query<JobRow>(
-    `INSERT INTO jobs (image_id, user_id, options, options_hash)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO jobs (image_id, user_id, options, options_hash, batch_id)
+     VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (image_id, options_hash)
        WHERE status IN ('pending', 'processing', 'ready')
        DO NOTHING
      RETURNING *`,
-    [imageId, userId, JSON.stringify(options), optionsHash],
+    [imageId, userId, JSON.stringify(options), optionsHash, batchId],
   );
 
   return rows[0] ?? null;
+}
+
+/**
+ * Every job of one bulk request, oldest first so the order matches the request.
+ *
+ * Scoped by user as well as by batch id: a batch id somebody else guessed returns
+ * nothing rather than their work.
+ */
+export async function findJobsByBatchForUser(batchId: string, userId: string): Promise<JobRow[]> {
+  const { rows } = await pool.query<JobRow>(
+    `SELECT * FROM jobs
+     WHERE batch_id = $1 AND user_id = $2
+     ORDER BY created_at ASC, id ASC`,
+    [batchId, userId],
+  );
+
+  return rows;
 }
 
 /**

@@ -41,6 +41,8 @@ export type JobRow = {
   id: string;
   image_id: string;
   user_id: string;
+  /** Set when the job came from a bulk request; null for a single transform. */
+  batch_id: string | null;
   options: unknown;
   options_hash: string;
   status: JobStatus;

@@ -42,6 +42,22 @@ export async function findImageByIdForUser(id: string, userId: string): Promise<
   return rows[0] ?? null;
 }
 
+/**
+ * Every one of `ids` that this user owns, in one query.
+ *
+ * A bulk request has to check ownership for a whole list, and asking one at a time
+ * would be a loop whose one missing check hands somebody else's image to a caller. The
+ * caller compares what comes back against what it asked for.
+ */
+export async function findImagesByIdsForUser(ids: string[], userId: string): Promise<ImageRow[]> {
+  const { rows } = await pool.query<ImageRow>(
+    'SELECT * FROM images WHERE id = ANY($1::uuid[]) AND user_id = $2',
+    [ids, userId],
+  );
+
+  return rows;
+}
+
 // History is what the user is shown, so the cap and the listing have to agree on
 // what counts: an ephemeral row exists only to carry a transform past a full
 // history and is never listed.
