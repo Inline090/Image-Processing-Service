@@ -238,6 +238,49 @@ export async function getJob(id: string): Promise<Job> {
   return result.job;
 }
 
+export type BatchJob = {
+  id: string;
+  imageId: string;
+  status: Job['status'];
+  progress: number;
+  attempts: number;
+  error: string | null;
+  width: number | null;
+  height: number | null;
+};
+
+export type Batch = {
+  batchId: string;
+  total: number;
+  pending: number;
+  processing: number;
+  ready: number;
+  failed: number;
+  /** True once every job has finished, either way. */
+  settled: boolean;
+  jobs: BatchJob[];
+};
+
+export type BulkResult = {
+  batchId: string;
+  queued: number;
+  /** Images needing no new work: the result existed, or was already being produced. */
+  alreadyDone: number;
+  jobs: Job[];
+};
+
+export function transformBulk(imageIds: string[], options: TransformOptions): Promise<BulkResult> {
+  return request<BulkResult>('/images/transform-bulk', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageIds, options }),
+  });
+}
+
+export function getBatch(id: string): Promise<Batch> {
+  return request<Batch>(`/jobs/batch/${id}`);
+}
+
 export type DownloadVariant = 'original' | 'processed';
 
 export type Download = {
