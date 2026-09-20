@@ -37,11 +37,19 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
     }
 
     try {
-      await processJob(message);
+      const outcome = await processJob(message);
 
+      // Not naming it in batchItemFailures is what tells Lambda to delete the message.
+      // A skipped job has been dealt with, so reporting it as a failure would only
+      // deliver it again.
       logger.info(
-        { jobId: message.jobId, messageId: record.messageId, durationMs: Date.now() - startedAt },
-        'job completed',
+        {
+          jobId: message.jobId,
+          messageId: record.messageId,
+          outcome,
+          durationMs: Date.now() - startedAt,
+        },
+        outcome === 'skipped' ? 'job skipped' : 'job completed',
       );
     } catch (err) {
       logger.error(

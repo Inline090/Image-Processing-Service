@@ -16,7 +16,7 @@ import {
   findImageByIdForUser,
   listImagesForUser,
 } from '../repositories/images.js';
-import { createJob, findReadyJob } from '../repositories/jobs.js';
+import { createJob, findLiveJob, findReadyJob } from '../repositories/jobs.js';
 import { findUserById, recordGuestUpload } from '../repositories/users.js';
 import { downloadQuerySchema, listImagesQuerySchema } from '../schemas/image.schema.js';
 import type { TransformInput } from '../schemas/transform.schema.js';
@@ -146,11 +146,38 @@ export async function transform(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const job = await createJob({ imageId: image.id, userId: authUser.sub, options, optionsHash });
-  await publishTransformJob({ jobId: job.id, imageId: image.id, userId: authUser.sub, options });
+  const created = await createJob({ imageId: image.id, userId: authUser.sub, options, optionsHash });
+
+  // Two identical requests can arrive together, both miss the cache above, and both
+  // try to insert. The unique index decides: the loser gets no row back and adopts the
+  // winner's job instead of queueing the same work a second time.
+  if (created === null) {
+    const inFlight = await findLiveJob(image.id, optionsHash);
+
+    if (inFlight === null) {
+      throw new AppError('Could not queue the transform', 500);
+    }
+
+    res.json({
+      job: {
+        ...serializeJob(inFlight),
+        processedUrl:
+          inFlight.processed_key === null ? null : await signedUrl(inFlight.processed_key),
+      },
+      cached: inFlight.status === 'ready',
+    });
+    return;
+  }
+
+  await publishTransformJob({
+    jobId: created.id,
+    imageId: image.id,
+    userId: authUser.sub,
+    options,
+  });
 
   res.status(202).json({
-    job: { ...serializeJob(job), processedUrl: null },
+    job: { ...serializeJob(created), processedUrl: null },
     cached: false,
   });
 }

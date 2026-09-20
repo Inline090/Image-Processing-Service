@@ -36,11 +36,16 @@ async function pollOnce(): Promise<void> {
   }
 
   try {
-    await processJob(job);
+    const outcome = await processJob(job);
 
+    // A skipped job still leaves the queue. Either another consumer holds it or it is
+    // already done, and leaving it would only hand the same job to somebody else.
     await deleteJob(receiptHandle);
 
-    logger.info({ jobId: job.jobId, durationMs: Date.now() - startedAt }, 'job completed');
+    logger.info(
+      { jobId: job.jobId, outcome, durationMs: Date.now() - startedAt },
+      outcome === 'skipped' ? 'job skipped' : 'job completed',
+    );
   } catch (err) {
     logger.error(
       { err, jobId: job.jobId, durationMs: Date.now() - startedAt },

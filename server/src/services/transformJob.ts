@@ -21,14 +21,27 @@ export function failureMessage(err: unknown): string {
 }
 
 /**
+ * What one attempt produced. `skipped` means the job was not this consumer's to run:
+ * another worker holds it, it has already finished, or its claim went stale and was
+ * taken over. Nothing failed, and the message should still leave the queue - the job
+ * has been dealt with, just not by here.
+ */
+export type ProcessOutcome = 'processed' | 'skipped';
+
+/**
  * Runs one transform end to end: read the original, process it, and store the result.
  *
  * It throws on failure rather than deciding what that means, because the two things
  * that consume the queue retry differently - the poll loop in worker.ts on a
  * long-lived host, and the queue's own redrive policy when the worker runs on Lambda.
  */
-export async function processJob(message: TransformJobMessage): Promise<void> {
-  await markJobProcessing(message.jobId);
+export async function processJob(message: TransformJobMessage): Promise<ProcessOutcome> {
+  const claimed = await markJobProcessing(message.jobId);
+
+  if (!claimed) {
+    logger.info({ jobId: message.jobId }, 'job not claimed - another consumer has it');
+    return 'skipped';
+  }
 
   const image = await findImageByIdForUser(message.imageId, message.userId);
   if (image === null) {
@@ -61,6 +74,8 @@ export async function processJob(message: TransformJobMessage): Promise<void> {
     },
     'job output stored',
   );
+
+  return 'processed';
 }
 
 /**
