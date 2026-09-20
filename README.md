@@ -155,7 +155,34 @@ Every success response is `{ resource: ... }` and every error is `{ error: { mes
 | DELETE | `/api/images/:id`              | Deletes one image and its stored objects, `404` if it is not yours    |
 | DELETE | `/api/images`                  | Deletes every image you own, and their stored objects, `{ deleted }`  |
 | POST   | `/api/images/:id/transform`    | Returns `202` with a job, or `200` if that transform is cached        |
+| POST   | `/api/images/transform-bulk`   | One set of options applied to up to 10 images, `202` with a batch id  |
 | GET    | `/api/jobs/:id`                | Job status, for polling                                               |
+| GET    | `/api/jobs/batch/:id`          | Counts and per-image status for one bulk request                      |
+
+### Bulk transform
+
+`POST /api/images/transform-bulk` takes `{ imageIds, options }` and applies the same
+options to every image in the list, up to ten at a time. It answers `202` with a batch
+id, the jobs it queued, and a count of images that needed no new work because the result
+already existed.
+
+Each image gets its own job and its own queue message, sharing one batch id. A single job
+carrying the whole list would have to finish inside one visibility timeout, and retrying
+it would redo the images that had already succeeded; separate jobs keep the retry rule,
+the dead-letter rule and the per-image status identical to a single transform.
+
+`GET /api/jobs/batch/:id` reports the whole request in one query - a count per status and
+each job - so a client showing progress on ten pictures does not have to make ten
+requests.
+
+Ownership is checked for the whole list in one query, and one image that is not yours
+fails the entire request with `404`, saying nothing about which id was the problem. The
+list is de-duplicated before the cap is applied, so sending the same image twice costs
+one slot rather than two.
+
+The route is limited in the same unit as the single-image one: thirty images per window,
+which is three batches of ten. Counting a batch as one request would let a caller queue
+ten times the work the single route allows.
 
 ## Transform Options
 
