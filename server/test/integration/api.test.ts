@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import type { Server } from 'node:http';
 import { after, before, describe, it } from 'node:test';
 import app from '../../src/app.js';
-import { config } from '../../src/config.js';
+import { config, MAX_BULK_IMAGES } from '../../src/config.js';
 import { pool } from '../../src/db/pool.js';
 import { signToken } from '../../src/utils/jwt.js';
 
@@ -535,5 +535,158 @@ describe('history limit', () => {
     const after = (await relisted.json()) as { total: number };
 
     assert.equal(after.total, 0);
+  });
+});
+
+describe('bulk transform', () => {
+  const email = `bulk-${runId}@example.com`;
+  let token = '';
+  let userId = '';
+
+  before(async () => {
+    // Inserted directly and given a token rather than going through the auth routes:
+    // those share one rate-limit budget with every other request in this file.
+    const { rows } = await pool.query<{ id: string }>(
+      'INSERT INTO users (email) VALUES ($1) RETURNING id',
+      [email],
+    );
+
+    userId = rows[0]?.id ?? '';
+    token = signToken({ sub: userId, email });
+
+    await seedImages(userId, 3);
+  });
+
+  after(async () => {
+    await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+  });
+
+  async function idsOf(): Promise<string[]> {
+    const response = await fetch(`${baseUrl}/api/images`, authed(token));
+    const body = (await response.json()) as { images: Array<{ id: string }> };
+
+    return body.images.map((image) => image.id);
+  }
+
+  // Built here rather than shared, because this is the only suite that posts a json
+  // body with a token.
+  function bulkRequest(imageIds: string[], options: unknown): RequestInit {
+    return {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ imageIds, options }),
+    };
+  }
+
+  // The endpoint itself cannot be driven end to end here: it publishes to the queue,
+  // and this suite has no queue - the same reason the single transform is a manual
+  // check. What follows covers the batch view and the request's refusals, neither of
+  // which needs one.
+
+  async function seedBatch(count: number): Promise<string> {
+    const { rows } = await pool.query<{ id: string }>('SELECT gen_random_uuid() AS id');
+    const batchId = rows[0]?.id ?? '';
+
+    for (let index = 0; index < count; index += 1) {
+      await pool.query(
+        `INSERT INTO jobs (image_id, user_id, options, options_hash, batch_id)
+         SELECT id, $1, '{}'::jsonb, $2, $3 FROM images
+         WHERE user_id = $1 ORDER BY created_at OFFSET $4 LIMIT 1`,
+        [userId, `bulk-${batchId}-${index}`, batchId, index],
+      );
+    }
+
+    return batchId;
+  }
+
+  it('reports a batch from its own jobs, and settles once they finish', async () => {
+    const batchId = await seedBatch(3);
+
+    const started = await fetch(`${baseUrl}/api/jobs/batch/${batchId}`, authed(token));
+    const body = (await started.json()) as {
+      total: number;
+      pending: number;
+      ready: number;
+      settled: boolean;
+    };
+
+    assert.equal(started.status, 200);
+    assert.equal(body.total, 3);
+    assert.equal(body.pending, 3);
+    assert.equal(body.ready, 0);
+    assert.equal(body.settled, false);
+
+    await pool.query(`UPDATE jobs SET status = 'ready' WHERE batch_id = $1`, [batchId]);
+
+    const finished = await fetch(`${baseUrl}/api/jobs/batch/${batchId}`, authed(token));
+    const done = (await finished.json()) as { ready: number; settled: boolean };
+
+    assert.equal(done.ready, 3);
+    assert.equal(done.settled, true);
+  });
+
+  it('hides a batch that belongs to somebody else', async () => {
+    const batchId = await seedBatch(1);
+    const otherToken = await tokenFor(emailA);
+
+    const response = await fetch(`${baseUrl}/api/jobs/batch/${batchId}`, authed(otherToken));
+
+    assert.equal(response.status, 404);
+  });
+
+  it('refuses the whole request when one image is not the caller own', async () => {
+    const ids = await idsOf();
+    const otherUser = await findUserId(emailA);
+    const { rows } = await pool.query<{ id: string }>(
+      `INSERT INTO images (user_id, original_key, mime_type, size_bytes)
+       VALUES ($1, $2, 'image/png', 1000) RETURNING id`,
+      [otherUser, `test/${otherUser}/bulk-not-yours`],
+    );
+    const foreign = rows[0]?.id ?? '';
+    const asked = [foreign, ...ids];
+
+    const jobsFor = async (): Promise<number> => {
+      const { rows: counted } = await pool.query<{ count: number }>(
+        'SELECT count(*)::int AS count FROM jobs WHERE image_id = ANY($1::uuid[])',
+        [asked],
+      );
+
+      return counted[0]?.count ?? 0;
+    };
+
+    const before = await jobsFor();
+
+    const response = await fetch(
+      `${baseUrl}/api/images/transform-bulk`,
+      bulkRequest(asked, { width: 64 }),
+    );
+
+    // One answer for the whole request, saying nothing about which id was the problem,
+    // and nothing queued for the images that were fine either.
+    assert.equal(response.status, 404);
+    assert.equal(await jobsFor(), before);
+  });
+
+  it('rejects a batch larger than the cap', async () => {
+    const over = Array.from(
+      { length: MAX_BULK_IMAGES + 1 },
+      (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+    );
+
+    const response = await fetch(
+      `${baseUrl}/api/images/transform-bulk`,
+      bulkRequest(over, { width: 64 }),
+    );
+
+    assert.equal(response.status, 400);
+  });
+
+  it('rejects a batch with no images', async () => {
+    const response = await fetch(
+      `${baseUrl}/api/images/transform-bulk`,
+      bulkRequest([], { width: 64 }),
+    );
+
+    assert.equal(response.status, 400);
   });
 });
