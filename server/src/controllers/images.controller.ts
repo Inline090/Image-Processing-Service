@@ -14,10 +14,12 @@ import {
   deleteImageForUser,
   deleteSettledEphemeralForUser,
   findImageByIdForUser,
+  findImagesByIdsForUser,
   listImagesForUser,
 } from '../repositories/images.js';
 import { createJob, findLiveJob, findReadyJob } from '../repositories/jobs.js';
 import { findUserById, recordGuestUpload } from '../repositories/users.js';
+import type { BulkTransformInput } from '../schemas/bulk.schema.js';
 import { downloadQuerySchema, listImagesQuerySchema } from '../schemas/image.schema.js';
 import type { TransformInput } from '../schemas/transform.schema.js';
 import { downloadFilename } from '../storage/filename.js';
@@ -179,6 +181,79 @@ export async function transform(req: Request, res: Response): Promise<void> {
   res.status(202).json({
     job: { ...serializeJob(created), processedUrl: null },
     cached: false,
+  });
+}
+
+/**
+ * Queues the same transform for several images at once.
+ *
+ * Each image gets its own job and its own message, sharing one batch id, rather than
+ * one job carrying the whole list. A single job for a batch would have to finish inside
+ * one visibility timeout, and retrying it would redo the images that already worked;
+ * separate jobs keep the retry rule, the dead-letter rule and the per-image status
+ * exactly as they are for a single transform.
+ */
+export async function transformBulk(req: Request, res: Response): Promise<void> {
+  const authUser = req.user;
+  if (authUser === undefined) {
+    throw new AppError('Not authenticated', 401);
+  }
+
+  const { imageIds, options } = req.body as BulkTransformInput;
+
+  // One query for the whole list. Anything missing is either not this user's or not
+  // real, and the caller is told neither which - the same answer a single transform
+  // gives for somebody else's image.
+  const owned = await findImagesByIdsForUser(imageIds, authUser.sub);
+
+  if (owned.length !== imageIds.length) {
+    throw new AppError('One or more of those images were not found', 404);
+  }
+
+  const batchId = randomUUID();
+  const queued: JobRow[] = [];
+  let alreadyDone = 0;
+
+  for (const image of owned) {
+    const optionsHash = hashTransformOptions(image.id, options);
+    const ready = await findReadyJob(image.id, optionsHash);
+
+    if (ready !== null) {
+      alreadyDone += 1;
+      continue;
+    }
+
+    const job = await createJob({
+      imageId: image.id,
+      userId: authUser.sub,
+      options,
+      optionsHash,
+      batchId,
+    });
+
+    // The unique index refused it, so another request is already producing this exact
+    // result. This batch queued nothing for that image, which is what alreadyDone
+    // counts - it means the work is not ours, not that it is finished.
+    if (job === null) {
+      alreadyDone += 1;
+      continue;
+    }
+
+    await publishTransformJob({
+      jobId: job.id,
+      imageId: image.id,
+      userId: authUser.sub,
+      options,
+    });
+
+    queued.push(job);
+  }
+
+  res.status(202).json({
+    batchId,
+    queued: queued.length,
+    alreadyDone,
+    jobs: queued.map(serializeJob),
   });
 }
 
