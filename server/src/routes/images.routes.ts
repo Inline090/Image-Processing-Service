@@ -8,13 +8,19 @@ import {
   transform,
   transformBulk,
   uploadImage,
+  uploadImages,
 } from '../controllers/images.controller.js';
 import { requireAuth } from '../middleware/auth.js';
 import { bulkTransformRateLimit, transformRateLimit } from '../middleware/rateLimit.js';
 import { validateBody } from '../middleware/validate.js';
 import { bulkTransformSchema } from '../schemas/bulk.schema.js';
 import { transformSchema } from '../schemas/transform.schema.js';
-import { uploadSingleImage, validateImageFile } from '../middleware/upload.js';
+import {
+  uploadManyImages,
+  uploadSingleImage,
+  validateImageFile,
+  validateImageFiles,
+} from '../middleware/upload.js';
 
 export const imagesRouter = Router();
 
@@ -24,8 +30,8 @@ imagesRouter.get('/:id/download', requireAuth, downloadImage);
 imagesRouter.delete('/', requireAuth, clearImages);
 imagesRouter.delete('/:id', requireAuth, removeImage);
 imagesRouter.post('/', requireAuth, uploadSingleImage, validateImageFile, uploadImage);
+imagesRouter.post('/batch', requireAuth, uploadManyImages, validateImageFiles, uploadImages);
 
-// Declared before the single-image route so neither can ever shadow the other.
 imagesRouter.post(
   '/transform-bulk',
   requireAuth,
