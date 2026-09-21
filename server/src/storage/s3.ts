@@ -8,7 +8,12 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config.js';
 import { contentDisposition } from './filename.js';
 
-export const s3 = new S3Client({ region: config.awsRegion });
+// Path style against the local emulator, virtual host against real S3.
+export const s3 = new S3Client({
+  region: config.awsRegion,
+  endpoint: config.s3Endpoint,
+  forcePathStyle: config.s3Endpoint !== undefined,
+});
 
 export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
   await s3.send(
@@ -41,8 +46,6 @@ export function signedUrl(key: string, expiresInSeconds = 900): Promise<string> 
   });
 }
 
-// The disposition is part of the signed query string, so the browser saves the
-// object under a name we chose and a client cannot rewrite it.
 export function signedDownloadUrl(
   key: string,
   filename: string,

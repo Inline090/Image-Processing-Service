@@ -29,8 +29,7 @@ Failed jobs are retried instead of being dropped. The message remains in the que
 ### Prerequisites
 
 - Node.js 20+ and npm
-- PostgreSQL 16 - a database you run yourself, or a hosted one such as Supabase (see [Hosting](#hosting))
-- An AWS account, for the S3 bucket and the SQS queues
+- Docker, for the local stack below. An AWS account is only needed to deploy - see [Deploy to AWS](#deploy-to-aws).
 
 ### 1. Clone and Install
 
@@ -40,9 +39,17 @@ cd "Image Processing Service"
 npm install
 ```
 
-### 2. Have a Database Ready
+### 2. Start the Local Stack
 
-Storage and the queue are AWS services, so those are set up in [Deploy to AWS](#deploy-to-aws) below. The database is the one piece this repository does not start for you: use a PostgreSQL 16 instance you can already reach, or create a hosted one - Supabase and Neon both hand you a ready-made url, covered under [The database](#the-database). Its url goes into `DATABASE_URL` in the next step.
+Storage and the queue have local stand-ins that speak the same protocols, so none of this needs an AWS account:
+
+```bash
+docker compose up -d
+```
+
+PostgreSQL comes up on `5432`, MinIO (the S3 API) on `9000` with its console on `9001`, and ElasticMQ (the SQS API) on `9324`. The compose file also creates the `image-processing-originals` bucket, because the application never creates one. Both queues create themselves on the API's first use.
+
+The application itself is deliberately not in that file: it runs on the host, where `tsx watch` can reload it.
 
 ### 3. Configure the Environment
 
@@ -50,11 +57,24 @@ Storage and the queue are AWS services, so those are set up in [Deploy to AWS](#
 cp server/.env.example server/.env
 ```
 
-`JWT_SECRET` is the only value you have to supply. Everything else has a working default except the AWS settings, which are covered in [Deploy to AWS](#deploy-to-aws).
+`JWT_SECRET` is the only value you have to supply. Uncomment these four lines so the app talks to the local stack instead of AWS:
+
+```bash
+AWS_ACCESS_KEY_ID=minioadmin
+AWS_SECRET_ACCESS_KEY=minioadmin
+S3_ENDPOINT=http://localhost:9000
+SQS_ENDPOINT=http://localhost:9324
+```
+
+Empty endpoints mean the real AWS services, and that is the entire difference between a local run and a deployed one - both speak the same protocols, so the code path is identical either way.
+
+The remaining settings:
 
 - `MAX_INPUT_PIXELS` caps the decoded size of an upload, default 50 megapixels.
 - `GUEST_UPLOAD_LIMIT` caps how many images a guest account may upload, default 5. Set it high to make guests effectively unlimited, or to 1 to make the account a single-shot trial.
 - `HISTORY_LIMIT` caps how many images a user keeps in their history, default 12. Past the cap an upload is not refused - see [History limit](#history-limit) below.
+- `RESEND_API_KEY` is what the completion email is sent with. Leave it empty and batches still run, there is simply no email.
+- `EMAIL_FROM` is the address that email comes from, defaulting to Resend's own test sender. Anything else has to be on a domain verified with Resend.
 - `SQS_VISIBILITY_TIMEOUT` must exceed the slowest job, or a message can be picked up twice.
 - `CORS_ORIGINS` lists the browser origins allowed to call the API, comma separated. Empty allows same-origin only.
 - `TRUST_PROXY` is the number of proxies in front of the API. Set it to 1 behind a load balancer, or every visitor is rate limited as one address.
@@ -86,6 +106,8 @@ Visit `http://localhost:5173` for the client.
 - Client - http://localhost:5173
 - API - http://localhost:3000
 - PostgreSQL - `localhost:5432`, database `image_processing`, `ips` / `ips`
+- MinIO - http://localhost:9000, console on http://localhost:9001, `minioadmin` / `minioadmin`
+- ElasticMQ - http://localhost:9324
 
 ## Project Structure
 

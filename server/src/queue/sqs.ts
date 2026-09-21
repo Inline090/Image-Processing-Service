@@ -11,10 +11,14 @@ import {
 import { config } from '../config.js';
 import type { TransformInput } from '../schemas/transform.schema.js';
 
-export const sqs = new SQSClient({ region: config.awsRegion });
+export const sqs = new SQSClient({
+  region: config.awsRegion,
+  endpoint: config.sqsEndpoint,
+});
 
 const QUEUE_NAME = 'transformations';
 const DEAD_LETTER_QUEUE_NAME = 'transformations-dlq';
+// Long polling: an idle worker waits here instead of asking every second.
 const WAIT_TIME_SECONDS = 20;
 
 export const MAX_RECEIVE_COUNT = 3;
@@ -77,6 +81,7 @@ async function configureQueue(): Promise<string> {
   const deadLetterUrl = await queueUrl(DEAD_LETTER_QUEUE_NAME);
   const deadLetterArn = await queueArn(deadLetterUrl);
 
+  // Set on every start, so a queue left with the old defaults gets corrected.
   const mainUrl = await queueUrl(QUEUE_NAME);
 
   await sqs.send(
