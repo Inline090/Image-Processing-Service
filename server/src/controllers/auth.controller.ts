@@ -4,31 +4,31 @@ import { config } from '../config.js';
 import type { UserRow } from '../db/types.js';
 import { AppError } from '../middleware/error.js';
 import { createUser, findUserById } from '../repositories/users.js';
+import { notifyAddress } from '../services/email.js';
+import { guestUploadsUsed } from '../services/guestAllowance.js';
 import { signToken } from '../utils/jwt.js';
+import { guestKey } from '../middleware/guestSession.js';
 
-// One shape wherever a user is returned, so the client can always read the
-// account type and its cap from the same fields.
-function serializeUser(user: UserRow) {
+async function serializeUser(user: UserRow, usageKey: string | null) {
   return {
     id: user.id,
     email: user.email,
     createdAt: user.created_at,
+    avatarUrl: user.avatar_url,
     guest: user.is_guest,
     uploadLimit: user.is_guest ? config.guestUploadLimit : null,
-    // How much of that limit has been spent. Deletions do not lower it.
-    uploadsUsed: user.guest_upload_count,
+    emailable: notifyAddress(user.email) !== null,
+    uploadsUsed: await guestUploadsUsed(user, usageKey),
   };
 }
 
-// A throwaway account: no address to verify, no password, and a cap on how much it can
-// upload. A real account is the way past that cap, and the way in is a provider.
-export async function guest(_req: Request, res: Response): Promise<void> {
+export async function guest(req: Request, res: Response): Promise<void> {
   const email = `guest-${randomUUID()}@guest.local`;
 
   const user = await createUser({ email, isGuest: true });
   const token = signToken({ sub: user.id, email: user.email });
 
-  res.status(201).json({ token, user: serializeUser(user) });
+  res.status(201).json({ token, user: await serializeUser(user, guestKey(req)) });
 }
 
 export async function me(req: Request, res: Response): Promise<void> {
@@ -42,5 +42,5 @@ export async function me(req: Request, res: Response): Promise<void> {
     throw new AppError('User no longer exists', 404);
   }
 
-  res.json({ user: serializeUser(user) });
+  res.json({ user: await serializeUser(user, guestKey(req)) });
 }

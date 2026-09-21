@@ -12,18 +12,21 @@ import {
   createImage,
   deleteAllImagesForUser,
   deleteImageForUser,
-  deleteSettledEphemeralForUser,
   findImageByIdForUser,
   findImagesByIdsForUser,
   listImagesForUser,
 } from '../repositories/images.js';
 import { createJob, findLiveJob, findReadyJob } from '../repositories/jobs.js';
+import { multerFiles } from '../middleware/upload.js';
+import { refundGuestUploads } from '../repositories/guestUsage.js';
 import { findUserById, recordGuestUpload } from '../repositories/users.js';
 import type { BulkTransformInput } from '../schemas/bulk.schema.js';
 import { downloadQuerySchema, listImagesQuerySchema } from '../schemas/image.schema.js';
 import type { TransformInput } from '../schemas/transform.schema.js';
+import { claimGuestUploads, guestUploadsLeft } from '../services/guestAllowance.js';
 import { downloadFilename } from '../storage/filename.js';
 import { deleteObject, putObject, signedDownloadUrl, signedUrl } from '../storage/s3.js';
+import { guestKey } from '../middleware/guestSession.js';
 
 async function serializeImage(image: ImageRow) {
   return {
@@ -34,8 +37,6 @@ async function serializeImage(image: ImageRow) {
     createdAt: image.created_at,
     originalUrl: await signedUrl(image.original_key),
     processedUrl: image.processed_key === null ? null : await signedUrl(image.processed_key),
-    /** True when the history was full, so this one is not kept. */
-    ephemeral: image.ephemeral,
   };
 }
 
@@ -47,57 +48,131 @@ export async function uploadImage(req: Request, res: Response): Promise<void> {
 
   const file = req.file;
   if (file === undefined) {
-    throw new AppError('No file uploaded - expected a form field named "image"', 400);
+    throw new AppError('No file uploaded. Expected a form field named "image".', 400);
   }
 
-  // Checked before the object is written, so a refused upload leaves nothing in
-  // storage to clean up. Registered accounts are not capped. The counter is
-  // spent, not the live image count, so clearing the history does not refund
-  // quota - a guest gets these uploads once, ever.
   const user = await findUserById(authUser.sub);
   if (user === null) {
     throw new AppError('User no longer exists', 404);
   }
 
-  if (user.is_guest && user.guest_upload_count >= config.guestUploadLimit) {
+  const usageKey = guestKey(req);
+  const room = config.historyLimit - (await countHistoryForUser(authUser.sub));
+
+  if (room < 1) {
+    throw new AppError('Your history is full. Delete an image to make room.', 403);
+  }
+
+  const claimed = await claimGuestUploads(user, usageKey, 1);
+
+  if (claimed === 0) {
     throw new AppError(
-      `Guest accounts can upload ${config.guestUploadLimit} images in total. Create an account to keep uploading.`,
+      `Guest accounts can upload ${config.guestUploadLimit} images in total. Sign in to upload more.`,
       403,
     );
   }
 
-  // A full history does not refuse the upload: the transform still runs and its
-  // result is still downloadable, it just is not kept. The row is marked instead,
-  // so the cap bounds stored files without ever blocking the tool.
-  const historySize = await countHistoryForUser(authUser.sub);
-  const ephemeral = historySize >= config.historyLimit;
+  try {
+    const key = `originals/${authUser.sub}/${randomUUID()}`;
+    await putObject(key, file.buffer, file.mimetype);
 
-  const key = `originals/${authUser.sub}/${randomUUID()}`;
-  await putObject(key, file.buffer, file.mimetype);
+    const image = await createImage({
+      userId: authUser.sub,
+      originalKey: key,
+      mimeType: file.mimetype,
+      sizeBytes: file.size,
+      originalFilename: file.originalname,
+    });
 
-  const image = await createImage({
-    userId: authUser.sub,
-    originalKey: key,
-    mimeType: file.mimetype,
-    sizeBytes: file.size,
-    originalFilename: file.originalname,
-    ephemeral,
-  });
+    if (user.is_guest) {
+      await recordGuestUpload(authUser.sub);
+    }
 
-  // The scratch slot holds one image, so the one it replaced can go now - both
-  // its row and the objects it points at. Done after the new row exists, so an
-  // upload that fails earlier leaves the previous scratch intact.
-  if (ephemeral) {
-    await discardObjects(await deleteSettledEphemeralForUser(authUser.sub, image.id));
+    res.status(201).json({ image: await serializeImage(image) });
+  } catch (err) {
+    await refundGuestUploads(usageKey, claimed);
+    throw err;
+  }
+}
+
+export async function uploadImages(req: Request, res: Response): Promise<void> {
+  const authUser = req.user;
+  if (authUser === undefined) {
+    throw new AppError('Not authenticated', 401);
   }
 
-  // Charged only once the upload has actually landed, so a failed write does not
-  // cost the guest an image.
+  const files = multerFiles(req);
+  if (files.length === 0) {
+    throw new AppError('No files uploaded. Expected a form field named "images".', 400);
+  }
+
+  const user = await findUserById(authUser.sub);
+  if (user === null) {
+    throw new AppError('User no longer exists', 404);
+  }
+
+  const room = config.historyLimit - (await countHistoryForUser(authUser.sub));
+
+  if (files.length > room) {
+    throw new AppError(
+      room === 0
+        ? 'Your history is full. Delete an image to make room.'
+        : `Your history has room for ${room} more images.`,
+      403,
+    );
+  }
+
+  const usageKey = guestKey(req);
+  const left = await guestUploadsLeft(user, usageKey);
+
+  const claimed = await claimGuestUploads(
+    user,
+    usageKey,
+    user.is_guest ? Math.min(files.length, left) : files.length,
+  );
+  const accepted = files.slice(0, claimed);
+  const dropped = files.length - accepted.length;
+
+  if (accepted.length === 0) {
+    throw new AppError(
+      `Guest accounts can upload ${config.guestUploadLimit} images in total. Sign in to upload more.`,
+      403,
+    );
+  }
+
+  const created: ImageRow[] = [];
+
+  try {
+    for (const file of accepted) {
+      const key = `originals/${authUser.sub}/${randomUUID()}`;
+      await putObject(key, file.buffer, file.mimetype);
+
+      const image = await createImage({
+        userId: authUser.sub,
+        originalKey: key,
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+        originalFilename: file.originalname,
+      });
+
+      created.push(image);
+    }
+  } catch (err) {
+    await refundGuestUploads(usageKey, claimed);
+    throw err;
+  }
+
   if (user.is_guest) {
-    await recordGuestUpload(authUser.sub);
+    await Promise.all([
+      recordGuestUpload(authUser.sub, created.length),
+      refundGuestUploads(usageKey, claimed - created.length),
+    ]);
   }
 
-  res.status(201).json({ image: await serializeImage(image) });
+  res.status(201).json({
+    images: await Promise.all(created.map(serializeImage)),
+    dropped,
+  });
 }
 
 function serializeJob(job: JobRow) {
@@ -107,7 +182,6 @@ function serializeJob(job: JobRow) {
     status: job.status,
     attempts: job.attempts,
     error: job.error,
-    // The object key stays server-side: the client only ever needs a signed url.
     format: job.format,
     width: job.width,
     height: job.height,
@@ -148,11 +222,13 @@ export async function transform(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const created = await createJob({ imageId: image.id, userId: authUser.sub, options, optionsHash });
+  const created = await createJob({
+    imageId: image.id,
+    userId: authUser.sub,
+    options,
+    optionsHash,
+  });
 
-  // Two identical requests can arrive together, both miss the cache above, and both
-  // try to insert. The unique index decides: the loser gets no row back and adopts the
-  // winner's job instead of queueing the same work a second time.
   if (created === null) {
     const inFlight = await findLiveJob(image.id, optionsHash);
 
@@ -184,15 +260,6 @@ export async function transform(req: Request, res: Response): Promise<void> {
   });
 }
 
-/**
- * Queues the same transform for several images at once.
- *
- * Each image gets its own job and its own message, sharing one batch id, rather than
- * one job carrying the whole list. A single job for a batch would have to finish inside
- * one visibility timeout, and retrying it would redo the images that already worked;
- * separate jobs keep the retry rule, the dead-letter rule and the per-image status
- * exactly as they are for a single transform.
- */
 export async function transformBulk(req: Request, res: Response): Promise<void> {
   const authUser = req.user;
   if (authUser === undefined) {
@@ -201,9 +268,6 @@ export async function transformBulk(req: Request, res: Response): Promise<void> 
 
   const { imageIds, options } = req.body as BulkTransformInput;
 
-  // One query for the whole list. Anything missing is either not this user's or not
-  // real, and the caller is told neither which - the same answer a single transform
-  // gives for somebody else's image.
   const owned = await findImagesByIdsForUser(imageIds, authUser.sub);
 
   if (owned.length !== imageIds.length) {
@@ -231,9 +295,6 @@ export async function transformBulk(req: Request, res: Response): Promise<void> 
       batchId,
     });
 
-    // The unique index refused it, so another request is already producing this exact
-    // result. This batch queued nothing for that image, which is what alreadyDone
-    // counts - it means the work is not ours, not that it is finished.
     if (job === null) {
       alreadyDone += 1;
       continue;
@@ -266,7 +327,7 @@ export async function list(req: Request, res: Response): Promise<void> {
   const parsed = listImagesQuerySchema.safeParse(req.query);
 
   if (!parsed.success) {
-    throw new AppError(`Invalid query parameters - ${formatIssues(parsed.error)}`, 400);
+    throw new AppError(`Invalid query parameters. ${formatIssues(parsed.error)}`, 400);
   }
 
   const { page, limit } = parsed.data;
@@ -319,7 +380,7 @@ export async function downloadImage(req: Request, res: Response): Promise<void> 
   const parsed = downloadQuerySchema.safeParse(req.query);
 
   if (!parsed.success) {
-    throw new AppError(`Invalid query parameters - ${formatIssues(parsed.error)}`, 400);
+    throw new AppError(`Invalid query parameters. ${formatIssues(parsed.error)}`, 400);
   }
 
   const image = await findImageByIdForUser(imageId, authUser.sub);
@@ -340,9 +401,6 @@ export async function downloadImage(req: Request, res: Response): Promise<void> 
   res.json({ download: { url: await signedDownloadUrl(key, filename), filename } });
 }
 
-// The rows are already gone by this point, so a storage failure is logged rather
-// than surfaced: failing the request would only leave objects the user can no
-// longer see or reach.
 async function discardObjects(images: ImageRow[]): Promise<void> {
   const keys = images.flatMap((image) =>
     image.processed_key === null ? [image.original_key] : [image.original_key, image.processed_key],

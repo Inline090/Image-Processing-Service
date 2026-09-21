@@ -31,8 +31,6 @@ function readInt(name: string, fallback: number, min: number): number {
   return value;
 }
 
-// Express accepts either a hop count or a list of addresses here, and a count must
-// be a number rather than the string "2", so the digits are converted.
 function readTrustProxy(): string | number | undefined {
   const raw = optional('TRUST_PROXY', '');
   if (raw === '') {
@@ -57,6 +55,7 @@ const facebookAppSecret = optional('FACEBOOK_APP_SECRET', '');
 const twitterClientId = optional('TWITTER_CLIENT_ID', '');
 const twitterClientSecret = optional('TWITTER_CLIENT_SECRET', '');
 
+// Every env var is read and validated once, at startup.
 export const config = {
   env: optional('NODE_ENV', 'development'),
   logLevel: optional('LOG_LEVEL', 'info'),
@@ -72,7 +71,7 @@ export const config = {
   sqsVisibilityTimeout: readInt('SQS_VISIBILITY_TIMEOUT', 300, 1),
   maxInputPixels: readInt('MAX_INPUT_PIXELS', 50_000_000, 1),
   guestUploadLimit: readInt('GUEST_UPLOAD_LIMIT', 5, 1),
-  historyLimit: readInt('HISTORY_LIMIT', 12, 1),
+  historyLimit: readInt('HISTORY_LIMIT', 20, 1),
   corsOrigins: optional('CORS_ORIGINS', '')
     .split(',')
     .map((origin) => origin.trim())
@@ -85,16 +84,10 @@ export const config = {
   facebookAppSecret,
   twitterClientId,
   twitterClientSecret,
-  // Where the browser is sent after the round trip. Always this configured address,
-  // never one taken from the request, or the callback would be an open redirect.
   clientUrl: optional('CLIENT_URL', 'http://localhost:5173'),
+  resendApiKey: optional('RESEND_API_KEY', ''),
+  emailFrom: optional('EMAIL_FROM', 'Lumina <onboarding@resend.dev>'),
 } as const;
 
-/**
- * The most images one bulk request may carry.
- *
- * Bounded so a single request cannot queue a large amount of work at once, and so the
- * bulk limiter can be measured in the same unit as the single-image one: three batches
- * of ten is the same thirty images per window that the transform route allows.
- */
+// Bounded so one request cannot queue a large amount of work.
 export const MAX_BULK_IMAGES = 10;

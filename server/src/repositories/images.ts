@@ -7,8 +7,6 @@ export type NewImage = {
   mimeType: string;
   sizeBytes: number;
   originalFilename: string | null;
-  /** Outside the history cap: the scratch slot, replaced by the next upload. */
-  ephemeral?: boolean;
 };
 
 export async function createImage({
@@ -17,13 +15,12 @@ export async function createImage({
   mimeType,
   sizeBytes,
   originalFilename,
-  ephemeral = false,
 }: NewImage): Promise<ImageRow> {
   const { rows } = await pool.query<ImageRow>(
-    `INSERT INTO images (user_id, original_key, mime_type, size_bytes, original_filename, ephemeral)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO images (user_id, original_key, mime_type, size_bytes, original_filename)
+     VALUES ($1, $2, $3, $4, $5)
      RETURNING *`,
-    [userId, originalKey, mimeType, sizeBytes, originalFilename, ephemeral],
+    [userId, originalKey, mimeType, sizeBytes, originalFilename],
   );
 
   const image = rows[0];
@@ -42,13 +39,6 @@ export async function findImageByIdForUser(id: string, userId: string): Promise<
   return rows[0] ?? null;
 }
 
-/**
- * Every one of `ids` that this user owns, in one query.
- *
- * A bulk request has to check ownership for a whole list, and asking one at a time
- * would be a loop whose one missing check hands somebody else's image to a caller. The
- * caller compares what comes back against what it asked for.
- */
 export async function findImagesByIdsForUser(ids: string[], userId: string): Promise<ImageRow[]> {
   const { rows } = await pool.query<ImageRow>(
     'SELECT * FROM images WHERE id = ANY($1::uuid[]) AND user_id = $2',
@@ -58,9 +48,7 @@ export async function findImagesByIdsForUser(ids: string[], userId: string): Pro
   return rows;
 }
 
-// History is what the user is shown, so the cap and the listing have to agree on
-// what counts: an ephemeral row exists only to carry a transform past a full
-// history and is never listed.
+// Everything the user owns, newest first.
 export async function listImagesForUser(
   userId: string,
   limit: number,
@@ -68,7 +56,7 @@ export async function listImagesForUser(
 ): Promise<ImageRow[]> {
   const { rows } = await pool.query<ImageRow>(
     `SELECT * FROM images
-     WHERE user_id = $1 AND ephemeral = false
+     WHERE user_id = $1
      ORDER BY created_at DESC
      LIMIT $2 OFFSET $3`,
     [userId, limit, offset],
@@ -79,15 +67,13 @@ export async function listImagesForUser(
 
 export async function countHistoryForUser(userId: string): Promise<number> {
   const { rows } = await pool.query<{ count: string }>(
-    'SELECT count(*)::text AS count FROM images WHERE user_id = $1 AND ephemeral = false',
+    'SELECT count(*)::text AS count FROM images WHERE user_id = $1',
     [userId],
   );
 
   return Number(rows[0]?.count ?? 0);
 }
 
-// Both delete helpers return the removed rows so the caller can clean up the
-// objects they point at. Deleting an image cascades to its jobs.
 export async function deleteImageForUser(id: string, userId: string): Promise<ImageRow | null> {
   const { rows } = await pool.query<ImageRow>(
     'DELETE FROM images WHERE id = $1 AND user_id = $2 RETURNING *',
@@ -105,26 +91,3 @@ export async function deleteAllImagesForUser(userId: string): Promise<ImageRow[]
   return rows;
 }
 
-// Clearing the scratch slot is what keeps a full history bounded. A scratch that
-// is still being transformed is left alone - deleting its row would make the
-// worker fail against an image that no longer exists - and the next upload
-// collects it instead.
-export async function deleteSettledEphemeralForUser(
-  userId: string,
-  keepId: string,
-): Promise<ImageRow[]> {
-  const { rows } = await pool.query<ImageRow>(
-    `DELETE FROM images
-     WHERE user_id = $1
-       AND ephemeral = true
-       AND id <> $2
-       AND NOT EXISTS (
-         SELECT 1 FROM jobs
-         WHERE jobs.image_id = images.id AND jobs.status IN ('pending', 'processing')
-       )
-     RETURNING *`,
-    [userId, keepId],
-  );
-
-  return rows;
-}

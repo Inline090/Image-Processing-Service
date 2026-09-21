@@ -6,9 +6,6 @@ import { config, MAX_BULK_IMAGES } from '../../src/config.js';
 import { pool } from '../../src/db/pool.js';
 import { signToken } from '../../src/utils/jwt.js';
 
-// Signing a url needs credentials even though nothing here talks to AWS: the
-// signature is computed locally from the key. Placeholders keep the suite runnable
-// on a machine with no AWS setup, and real values from the environment win.
 process.env.AWS_ACCESS_KEY_ID ??= 'test-placeholder';
 process.env.AWS_SECRET_ACCESS_KEY ??= 'test-placeholder';
 process.env.AWS_EC2_METADATA_DISABLED ??= 'true';
@@ -25,13 +22,6 @@ function authed(token: string): RequestInit {
   return { headers: { Authorization: `Bearer ${token}` } };
 }
 
-/**
- * A token for a test account, made here rather than by signing in.
- *
- * Signing in is the one thing this suite cannot do: the only way in is a provider, and
- * that needs a real account and a network. The caller is created on first use, so any
- * test can ask for the same address without worrying about the order it runs in.
- */
 async function tokenFor(email: string): Promise<string> {
   const existing = await pool.query<{ id: string }>('SELECT id FROM users WHERE email = $1', [
     email,
@@ -190,7 +180,6 @@ describe('downloads', () => {
       [userId, `test/${userId}/original`],
     );
 
-    // Signed URLs are produced locally, so these rows never need real objects.
     const processed = await pool.query<{ id: string }>(
       `INSERT INTO images (user_id, original_key, mime_type, size_bytes, original_filename,
                            processed_key, processed_mime_type, status)
@@ -217,7 +206,7 @@ describe('downloads', () => {
     assert.equal(response.status, 200);
     assert.equal(body.download.filename, 'holiday photo.jpg');
     assert.ok(body.download.url.includes('response-content-disposition='));
-    assert.ok(decoded.includes('attachment; filename="holiday photo.jpg"'));
+    assert.ok(decoded.includes("attachment; filename*=UTF-8''holiday%20photo.jpg"));
   });
 
   it('renames a processed result to the format it was encoded as', async () => {
@@ -371,8 +360,6 @@ describe('guest sessions', () => {
   });
 
   after(async () => {
-    // The suite's global cleanup only knows the three registered test accounts,
-    // so the guest this file created has to be removed here.
     await pool.query('DELETE FROM users WHERE id = $1', [guestId]);
   });
 
@@ -399,8 +386,6 @@ describe('guest sessions', () => {
     assert.equal(body.total, 0);
   });
 
-  // A one-pixel PNG header: enough for the magic-byte check to accept it, so the
-  // request reaches the cap before anything is sent to storage.
   function uploadAttempt(): Promise<Response> {
     const png = Buffer.from([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
@@ -418,8 +403,6 @@ describe('guest sessions', () => {
     });
   }
 
-  // Written straight to the column because a real upload would need storage; the
-  // cap itself is what these tests are pinning down.
   async function spendAllowance(count: number): Promise<void> {
     await pool.query('UPDATE users SET guest_upload_count = $2 WHERE id = $1', [guestId, count]);
   }
@@ -431,7 +414,6 @@ describe('guest sessions', () => {
 
     assert.equal(response.status, 403);
 
-    // The cap is checked before the object is written, so nothing was added.
     const { rows } = await pool.query<{ count: number }>(
       'SELECT count(*)::int AS count FROM images WHERE user_id = $1',
       [guestId],
@@ -455,8 +437,6 @@ describe('guest sessions', () => {
 
     assert.equal(after.total, 0);
 
-    // The allowance is spent rather than borrowed, so an empty history does not
-    // reopen it - this is the whole point of counting uploads instead of rows.
     const response = await uploadAttempt();
 
     assert.equal(response.status, 403);
@@ -474,10 +454,8 @@ describe('history limit', () => {
   const email = `history-${runId}@example.com`;
   let token = '';
   let userId = '';
-  let scratchId = '';
 
   before(async () => {
-    // A caller whose listing is empty to start with, which is all this block needs.
     token = await tokenFor(email);
     userId = await findUserId(email);
   });
@@ -486,7 +464,7 @@ describe('history limit', () => {
     await pool.query('DELETE FROM users WHERE id = $1', [userId]);
   });
 
-  it('lists the history, and counts only that towards the total', async () => {
+  it('lists everything the user owns, and counts it in the total', async () => {
     await seedImages(userId, config.historyLimit);
 
     const listed = await fetch(`${baseUrl}/api/images?limit=100`, authed(token));
@@ -496,40 +474,40 @@ describe('history limit', () => {
     assert.equal(body.images.length, config.historyLimit);
   });
 
-  it('keeps a result past the cap out of the history but still reachable', async () => {
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO images (user_id, original_key, mime_type, size_bytes, ephemeral)
-       VALUES ($1, $2, 'image/png', 1000, true)
-       RETURNING id`,
-      [userId, `test/${userId}/scratch`],
+  it('refuses an upload once the history is full', async () => {
+    const png = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+      0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+      0x15, 0xc4, 0x89,
+    ]);
+
+    const form = new FormData();
+    form.append('image', new Blob([png], { type: 'image/png' }), 'over.png');
+
+    const response = await fetch(`${baseUrl}/api/images`, {
+      method: 'POST',
+      ...authed(token),
+      body: form,
+    });
+
+    assert.equal(response.status, 403);
+
+    const { rows } = await pool.query<{ count: number }>(
+      'SELECT count(*)::int AS count FROM images WHERE user_id = $1',
+      [userId],
     );
 
-    scratchId = rows[0]?.id ?? '';
-
-    const listed = await fetch(`${baseUrl}/api/images?limit=100`, authed(token));
-    const body = (await listed.json()) as { images: Array<{ id: string }>; total: number };
-
-    // Not part of the history, so it neither shows up nor counts towards the cap.
-    assert.equal(body.total, config.historyLimit);
-    assert.ok(!body.images.some((image) => image.id === scratchId));
-
-    // Still fetchable by id, which is what makes the result reachable without
-    // being kept: the job panel signs a url for it either way.
-    const fetched = await fetch(`${baseUrl}/api/images/${scratchId}`, authed(token));
-
-    assert.equal(fetched.status, 200);
+    assert.equal(rows[0]?.count, config.historyLimit);
   });
 
-  it('clears the scratch slot along with the history', async () => {
+  it('clears the whole history', async () => {
     const response = await fetch(`${baseUrl}/api/images`, {
       method: 'DELETE',
       ...authed(token),
     });
     const body = (await response.json()) as { deleted: number };
 
-    // Clearing the archive takes the unlisted scratch with it, rather than
-    // leaving a row the user cannot see or remove.
-    assert.equal(body.deleted, config.historyLimit + 1);
+    assert.equal(body.deleted, config.historyLimit);
 
     const relisted = await fetch(`${baseUrl}/api/images`, authed(token));
     const after = (await relisted.json()) as { total: number };
@@ -544,8 +522,6 @@ describe('bulk transform', () => {
   let userId = '';
 
   before(async () => {
-    // Inserted directly and given a token rather than going through the auth routes:
-    // those share one rate-limit budget with every other request in this file.
     const { rows } = await pool.query<{ id: string }>(
       'INSERT INTO users (email) VALUES ($1) RETURNING id',
       [email],
@@ -568,8 +544,6 @@ describe('bulk transform', () => {
     return body.images.map((image) => image.id);
   }
 
-  // Built here rather than shared, because this is the only suite that posts a json
-  // body with a token.
   function bulkRequest(imageIds: string[], options: unknown): RequestInit {
     return {
       method: 'POST',
@@ -577,11 +551,6 @@ describe('bulk transform', () => {
       body: JSON.stringify({ imageIds, options }),
     };
   }
-
-  // The endpoint itself cannot be driven end to end here: it publishes to the queue,
-  // and this suite has no queue - the same reason the single transform is a manual
-  // check. What follows covers the batch view and the request's refusals, neither of
-  // which needs one.
 
   async function seedBatch(count: number): Promise<string> {
     const { rows } = await pool.query<{ id: string }>('SELECT gen_random_uuid() AS id');
@@ -661,8 +630,6 @@ describe('bulk transform', () => {
       bulkRequest(asked, { width: 64 }),
     );
 
-    // One answer for the whole request, saying nothing about which id was the problem,
-    // and nothing queued for the images that were fine either.
     assert.equal(response.status, 404);
     assert.equal(await jobsFor(), before);
   });

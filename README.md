@@ -18,6 +18,7 @@ Failed jobs are retried instead of being dropped. The message remains in the que
 - **Transform Pipeline**: Resize, crop, rotate, trim, pad, mirror, modulate, blur, sharpen, grayscale, sepia, watermark, background flattening and format conversion with Sharp
 - **Result Caching**: Requesting the same transformation returns the stored result instead of re-running it
 - **Retries and Dead Letters**: Failed jobs are retried, and messages that keep failing move to a dead-letter queue
+- **Email on Completion**: A finished batch is announced by email, so nobody has to keep the page open
 - **Private Storage**: Images are served through short-lived pre-signed URLs
 - **Downloads**: Originals and processed results download under the name they were uploaded with, through a signed URL that is forced to save as an attachment
 - **Deletion**: Removing an image deletes its row, its jobs and both stored objects; the history can also be cleared in one request
@@ -72,7 +73,7 @@ The remaining settings:
 
 - `MAX_INPUT_PIXELS` caps the decoded size of an upload, default 50 megapixels.
 - `GUEST_UPLOAD_LIMIT` caps how many images a guest account may upload, default 5. Set it high to make guests effectively unlimited, or to 1 to make the account a single-shot trial.
-- `HISTORY_LIMIT` caps how many images a user keeps in their history, default 12. Past the cap an upload is not refused - see [History limit](#history-limit) below.
+- `HISTORY_LIMIT` caps how many images a user may keep, default 20. Past the cap an upload is refused with a `403` until something is deleted.
 - `RESEND_API_KEY` is what the completion email is sent with. Leave it empty and batches still run, there is simply no email.
 - `EMAIL_FROM` is the address that email comes from, defaulting to Resend's own test sender. Anything else has to be on a domain verified with Resend.
 - `SQS_VISIBILITY_TIMEOUT` must exceed the slowest job, or a message can be picked up twice.
@@ -97,7 +98,7 @@ npm run worker --workspace=server  # worker -> consumes the queue
 npm run dev:client                 # client -> http://localhost:5173
 ```
 
-The worker is not optional. Without it the API still accepts uploads and returns job ids, but every job stays at `pending`.
+The worker is not optional. Without it the API still accepts uploads and returns job ids, but every job stays at `pending`, and nothing tells an account that its batch finished.
 
 Visit `http://localhost:5173` for the client.
 
@@ -151,12 +152,14 @@ client/
 
 5. **Deliver.** The client polls `GET /api/jobs/:id`. Once the job is `ready` it gets a short-lived pre-signed URL and fetches the result directly from storage.
 
+6. **Notify.** When the last job of a batch is done, the worker emails the account that queued it. One `UPDATE` across the batch's jobs is the claim, so two workers finishing the last two jobs of a batch cannot both send. A batch counts as finished only when every job is `ready`, or `failed` with no attempts left - a job that failed but will be retried is not finished yet.
+
 ## Database Schema
 
 - **users**: id, email, password_hash, is_guest, guest_upload_count, created_at. `password_hash` is left in place but nothing writes it: sign-in is through a provider, and a guest account has no password at all
 - **oauth_accounts**: id, user_id, provider, provider_id, created_at. One row per linked sign-in provider, so one person can attach several
 - **images**: id, user_id, original_key, processed_key, mime_type, processed_mime_type, original_filename, size_bytes, width, height, status, created_at
-- **jobs**: id, image_id, user_id, options, options_hash, status, attempts, error, processed_key, width, height, format, created_at, updated_at
+- **jobs**: id, image_id, user_id, options, options_hash, status, attempts, error, processed_key, width, height, format, notified_at, created_at, updated_at
 - **schema_migrations**: applied migration names
 
 ## API Endpoints
@@ -268,16 +271,7 @@ Because the cache key is derived from the options, an option that changes the ou
 
 ## History Limit
 
-A user keeps at most `HISTORY_LIMIT` images in their history (default 12). The cap never refuses work: past it, an upload still goes through and its transform still runs, but the result is marked _ephemeral_ rather than being stored in the history.
-
-- Ephemeral images are excluded from `GET /api/images` and do not count towards the cap.
-- They remain reachable by id, so `GET /api/images/:id/download` still works and the job panel can hand over the result.
-- Only one is kept at a time: the next upload past the cap deletes the previous one, its row _and_ its stored objects. A user therefore stores at most `HISTORY_LIMIT + 1` images, no matter how much they transform.
-- A scratch that is still being transformed is left alone, so a queued job never has its image deleted underneath it.
-- Deleting from the history frees room, and the next upload is kept normally. Already-ephemeral results are not promoted retroactively.
-- `DELETE /api/images` clears the scratch along with the history, so nothing is left that the user cannot see or remove.
-
-The listing and the count share one predicate, so the size the UI reports and the rows it shows cannot disagree.
+A user keeps at most `HISTORY_LIMIT` images (default 20). Past the cap an upload is refused with `403 Your history is full. Delete an image to make room.`, so nothing is written to storage for a request that cannot be kept. A batch is refused the same way when the whole batch does not fit in the room left.
 
 ## Available Scripts
 
@@ -381,7 +375,7 @@ The worker can also run as an AWS Lambda function instead of a long-lived proces
 - Publish that folder as a static site
 - Set `VITE_API_URL` to the API's address **before building**. Vite bakes the value into the bundle, so changing it afterwards needs a rebuild rather than a restart.
 - Add the client's address to the API's `CORS_ORIGINS`, or the browser will refuse every call.
-- No rewrite rules are needed: the app has no routes, so everything is served from `index.html`.
+- Rewrite every path to `index.html`. The client has routes now, so a refresh or a shared link on `/history` reaches the host rather than the app - with no fallback it is a 404.
 
 ### Set production mode
 
@@ -393,7 +387,11 @@ There are three ways in, and no email-and-password sign-up. That was deliberate:
 
 ### As a guest
 
-`POST /api/auth/guest` makes a throwaway account and hands back a token, so the editor can be used straight away. It is capped: five uploads, counted server-side and never refunded, and clearing the history does not win any back. The browser also remembers that the allowance was spent, so starting a fresh guest session does not hand out another five. An account made this way has no password, and an address nobody could reach - `guest-<uuid>@guest.local` - made up only to satisfy a required column.
+`POST /api/auth/guest` makes a throwaway account and hands back a token, so the editor can be used straight away. It is capped: five uploads, counted against the account and against the browser, and clearing the history does not win any back.
+
+The browser's counter is keyed on a token this server issues in an HttpOnly cookie, so nothing in the page can read it or choose it. Clearing cookies starts that counter again, and the account's own counter is what refuses the visitor when they do - so the cap is a speed bump rather than a wall. The honest bound on anonymous use is the guest-creation rate limiter multiplied by the cap: ten accounts per address per window, five uploads each.
+
+An account made this way has no password, and an address nobody could reach - `guest-<uuid>@guest.local` - made up only to satisfy a required column.
 
 ### Through Google, Facebook or Twitter
 
