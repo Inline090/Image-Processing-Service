@@ -1,5 +1,3 @@
-/* Base layer — reset, typography, focus and motion. */
-
 *,
 *::before,
 *::after {
@@ -29,99 +27,71 @@ img {
 }
 
 body {
-  /* The top bar's band: the shell's top padding plus the wordmark lockup. Kept
-     beside the texture rules below, which leave this band clear. */
-  --header-band: calc(var(--space-6) + var(--brand-block));
-
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
   font-size: var(--text-body);
   line-height: var(--leading-body);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
 
-/* The signed-out screen carries the illustration. Setting it on body means it
-   paints the whole viewport through background propagation, so the image needs
-   no sized layer of its own. The drawing's cream is within a couple of points of
-   --background, so both screens still read as the same product rather than the
-   sign-in page looking like a separate site. */
-body:has(.shell--auth) {
-  background-image: url('../assets/signin-background.webp');
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-}
-
-/* The workspace is taller than the viewport, so the sign-in drawing cannot be one
-   cover image. It is reduced to its motifs instead - the wavy ink strokes, the
-   hollow circles, the ruled sheets and the dotted blocks - and tiled as a single
-   faint wash, so the page reads as the paper the product sits on rather than a
-   picture competing with the cards.
-
-   Only geometry is encoded below: a mask reads a shape's alpha, so the wash takes
-   its colour from --foreground and stays on the token system instead of
-   hard-coding an ink value. Drop the opacity to soften it, or a layer from the
-   list to thin it out. */
+/* The graph paper sits on its own layer, so the opacity does not fade the page. */
 body::before {
-  --paper-strokes: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='320'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round'%3E%3Cpath d='M36 54c10-15 21-15 31 0s21 15 31 0'/%3E%3Cpath d='M244 268c10-15 21-15 31 0s21 15 31 0'/%3E%3Ccircle cx='318' cy='66' r='5.5'/%3E%3Ccircle cx='104' cy='214' r='3.5'/%3E%3C/g%3E%3C/svg%3E");
-  --paper-sheets: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='560' height='420'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.5'%3E%3Crect x='76' y='104' width='132' height='92' rx='2'/%3E%3Cpath d='M98 138h88M98 160h62'/%3E%3Ccircle cx='466' cy='332' r='5'/%3E%3C/g%3E%3C/svg%3E");
-  --paper-dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='360'%3E%3Cg fill='none' stroke='%23000' stroke-width='5' stroke-linecap='round' stroke-dasharray='0 15'%3E%3Cpath d='M300 150v75'/%3E%3Cpath d='M315 150v75'/%3E%3Cpath d='M330 150v75'/%3E%3C/g%3E%3C/svg%3E");
-
   content: '';
   position: fixed;
   inset: 0;
   z-index: -1;
   pointer-events: none;
-
-  background-color: var(--foreground);
-  opacity: 0.22;
-
-  -webkit-mask-image: var(--paper-strokes), var(--paper-sheets), var(--paper-dots);
-  mask-image: var(--paper-strokes), var(--paper-sheets), var(--paper-dots);
-
-  /* Coprime tile sizes with offset origins, so the three motifs do not line up
-     into a visible grid as the page scrolls. */
-  -webkit-mask-size:
-    420px 320px,
-    560px 420px,
-    480px 360px;
-  mask-size:
-    420px 320px,
-    560px 420px,
-    480px 360px;
-  -webkit-mask-position:
+  opacity: 0.8;
+  background-color: #ffffff;
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      transparent 0,
+      transparent 1.6666666666666667px,
+      #ffffff 1.6666666666666667px,
+      #ffffff 5px,
+      transparent 5px,
+      transparent 6.666666666666667px
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 1.6666666666666667px,
+      #ffffff 1.6666666666666667px,
+      #ffffff 5px,
+      transparent 5px,
+      transparent 6.666666666666667px
+    ),
+    linear-gradient(to bottom, #2d3a31 0.6px, transparent 0.6px),
+    linear-gradient(to right, #2d3a31 0.6px, transparent 0.6px);
+  background-size:
+    100% 100%,
+    100% 100%,
+    20px 20px,
+    20px 20px;
+  background-position:
     0 0,
-    190px 140px,
-    110px 260px;
-  mask-position:
     0 0,
-    190px 140px,
-    110px 260px;
-  -webkit-mask-repeat: repeat;
-  mask-repeat: repeat;
+    0 -0.2px,
+    -0.2px 0;
 }
 
-/* The header sits on plain ground rather than on the wash. This paints the page
-   colour back over the band and eases out across the gutter beneath it, so the
-   pattern is introduced below the bar instead of being cut off mid-motif. */
-body::after {
-  content: '';
-  position: fixed;
-  inset: 0 0 auto 0;
-  height: calc(var(--header-band) + var(--space-8));
-  z-index: -1;
-  pointer-events: none;
-
-  background: linear-gradient(to bottom, var(--background) var(--header-band), transparent);
-}
-
-/* The illustration is the whole ground on the signed-out screen, so neither the
-   wash nor its cover belongs there. */
-body:has(.shell--auth)::before,
-body:has(.shell--auth)::after {
-  display: none;
+body:has(.shell--auth)::before {
+  background-image:
+    linear-gradient(#2d3a31 1px, transparent 1px),
+    linear-gradient(90deg, #2d3a31 1px, transparent 1px),
+    linear-gradient(#2d3a31 0.5px, transparent 0.5px),
+    linear-gradient(90deg, #2d3a31 0.5px, #ffffff 0.5px);
+  background-size:
+    50px 50px,
+    50px 50px,
+    10px 10px,
+    10px 10px;
+  background-position:
+    -1px -1px,
+    -1px -1px,
+    -0.5px -0.5px,
+    -0.5px -0.5px;
 }
 
 h1,
@@ -151,52 +121,17 @@ h3 {
   color: var(--muted-foreground);
 }
 
-/* Secondary reading text: the sign-in line, empty states. */
 .prose {
   font-size: var(--text-body);
   line-height: 1.6;
   color: var(--muted-foreground);
 }
 
-/* Values that change — dimensions, sizes, ids — must not shift width as they do. */
 .tabular {
   font-variant-numeric: tabular-nums;
-}
-
-.hairline {
-  height: 1px;
-  background: var(--border);
-}
-
-/* Keeps a label in the accessibility tree while removing it visually — used
-   where a placeholder carries the hint and the field is self-evident. */
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
 }
 
 ::placeholder {
   color: var(--placeholder);
 }
 
-:focus-visible {
-  outline: 2px solid var(--foreground);
-  outline-offset: 2px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
-}

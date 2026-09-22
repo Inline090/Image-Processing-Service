@@ -1,9 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-// Poppins ships as a static family with per-weight, per-subset files, so only the
-// two weights actually used are imported. DM Sans is variable — one file covers
-// the whole range. Note the naming split: the static family registers as plain
-// 'Poppins', the variable one as 'DM Sans Variable'.
+import { BrowserRouter } from 'react-router-dom';
 import '@fontsource/poppins/latin-600.css';
 import '@fontsource/poppins/latin-700.css';
 import '@fontsource-variable/dm-sans';
@@ -11,12 +8,14 @@ import './index.css';
 import App from './App.tsx';
 import { consumeAuthRedirect } from './api.ts';
 
-// Before the first render: a provider sign-in arrives as a token in the address bar,
-// and the app decides whether it is signed in as it mounts.
+// A provider sign-in lands back with the token in the address fragment.
 consumeAuthRedirect();
 
+// BrowserRouter wraps the app because it uses routes and useNavigate.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
   </StrictMode>,
 );
