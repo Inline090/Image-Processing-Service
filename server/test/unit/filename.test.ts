@@ -47,22 +47,26 @@ describe('download filename', () => {
 });
 
 describe('content disposition', () => {
-  it('quotes the name and adds the encoded form', () => {
+  it('carries the name in the encoded parameter', () => {
     assert.equal(
       contentDisposition('holiday.jpg'),
-      'attachment; filename="holiday.jpg"; filename*=UTF-8\'\'holiday.jpg',
+      'attachment; filename*=UTF-8\'\'holiday.jpg',
     );
   });
 
-  it('degrades a non-ascii name to underscores in the quoted fallback', () => {
+  it('encodes a non-ascii name instead of dropping it', () => {
     assert.equal(
       contentDisposition('写真.jpg'),
-      'attachment; filename="__.jpg"; filename*=UTF-8\'\'%E5%86%99%E7%9C%9F.jpg',
+      'attachment; filename*=UTF-8\'\'%E5%86%99%E7%9C%9F.jpg',
     );
   });
 
   it('escapes the characters that are not valid in the encoded form', () => {
     assert.ok(contentDisposition("a'b(c).jpg").includes("filename*=UTF-8''a%27b%28c%29.jpg"));
+  });
+
+  it('escapes the quotes and backslashes that would end the parameter', () => {
+    assert.ok(contentDisposition('a"b\\c.jpg').includes("filename*=UTF-8''a%22b%5Cc.jpg"));
   });
 
   it('always marks the response as an attachment', () => {

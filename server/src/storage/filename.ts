@@ -1,19 +1,15 @@
 const EXTENSIONS: Record<string, string> = {
   'image/avif': 'avif',
-  'image/bmp': 'bmp',
   'image/gif': 'gif',
   'image/jpeg': 'jpg',
   'image/png': 'png',
-  'image/tiff': 'tiff',
   'image/webp': 'webp',
 };
 
 const FALLBACK_EXTENSION = 'bin';
 const MAX_STEM_LENGTH = 64;
 
-// The stored name came from the client, so it is treated as hostile: control
-// characters would allow header injection, and separators would let the browser
-// save outside the intended folder.
+// The stored name is client input, so separators and control characters go.
 function safeStem(name: string): string {
   const printable = Array.from(name)
     .filter((char) => {
@@ -41,8 +37,7 @@ function extensionFor(mimeType: string): string {
   return EXTENSIONS[mimeType.toLowerCase()] ?? FALLBACK_EXTENSION;
 }
 
-// The extension follows the bytes that are actually being sent, not the name the
-// file arrived with, so a jpeg transformed to webp downloads as .webp.
+// The extension follows the bytes being sent, not the name it arrived with.
 export function downloadFilename(
   originalName: string | null,
   id: string,
@@ -52,11 +47,10 @@ export function downloadFilename(
 }
 
 export function contentDisposition(filename: string): string {
-  const ascii = filename.replace(/[^\u0020-\u007e]/g, '_').replace(/["\\]/g, '');
   const encoded = encodeURIComponent(filename).replace(
     /['()!*]/g,
     (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
   );
 
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+  return `attachment; filename*=UTF-8''${encoded}`;
 }
