@@ -1,11 +1,11 @@
 import { Pool } from 'pg';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
-import { sslOptionFor } from './ssl.js';
+import { connectionStringFor, sslOptionFor } from './ssl.js';
 
 // One pool per process. On Lambda keep it at one and let the database pool.
 export const pool = new Pool({
-  connectionString: config.databaseUrl,
+  connectionString: connectionStringFor(config.databaseUrl),
   ssl: sslOptionFor(config.databaseUrl),
   max: config.poolMax,
   idleTimeoutMillis: 30_000,
