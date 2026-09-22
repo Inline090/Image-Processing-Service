@@ -33,8 +33,6 @@ function twoToneImage(width: number, height: number): Promise<Buffer> {
   return rawImage(width, height, pixels);
 }
 
-// A grey field with a bright block against the left edge: a centre crop misses it
-// entirely, so a strategy that scans the image has to land somewhere brighter.
 function greyWithBrightBlock(width: number, height: number): Promise<Buffer> {
   const channels = 3;
   const pixels = Buffer.alloc(width * height * channels, 128);
@@ -281,9 +279,6 @@ describe('transform pipeline', () => {
 
     assert.equal(result.format, 'avif');
 
-    // 'ftyp' followed by the avif brand is proof the bytes really are AVIF rather
-    // than a container sharp has merely relabelled - sharp itself calls this
-    // format "heif", which is why the reported format is pinned separately.
     assert.equal(result.buffer.subarray(4, 8).toString('ascii'), 'ftyp');
     assert.equal(result.buffer.subarray(8, 12).toString('ascii'), 'avif');
   });
@@ -293,9 +288,6 @@ describe('transform pipeline', () => {
     const quick = await transformImage(noisy, { format: 'avif', effort: 0 });
     const thorough = await transformImage(noisy, { format: 'avif', effort: 6 });
 
-    // Effort is not a monotonic size dial - on incompressible input a higher
-    // effort can spend more bytes - so this pins that the value reaches the
-    // encoder, not that it wins.
     assert.notDeepEqual(quick.buffer, thorough.buffer);
     assert.equal(thorough.width, 128);
     assert.equal(thorough.format, 'avif');
@@ -321,5 +313,16 @@ describe('transform pipeline', () => {
       (await meanBrightness(entropy.buffer)) > (await meanBrightness(centred.buffer)),
       'entropy should keep the bright region the centre crop discards',
     );
+  });
+
+  it('leaves the pixels alone when the box matches the shape of the image', async () => {
+    const source = await greyWithBrightBlock(600, 400);
+    const sized = { width: 300, height: 200, format: 'png' } as const;
+
+    const centred = await transformImage(source, { ...sized, focus: 'center' });
+    const attention = await transformImage(source, { ...sized, focus: 'attention' });
+
+    assert.equal(centred.width, 300);
+    assert.deepEqual(centred.buffer, attention.buffer);
   });
 });
