@@ -10,25 +10,19 @@ import {
 import { Button } from './ui/Button';
 import { Panel } from './ui/Panel';
 
-// The real brand marks, from the icon set rather than drawn by hand. They are single
-// paths, so they take the button's own colour: three different logos would otherwise
-// fight the one accent this interface uses.
 const PROVIDERS: Array<{ id: SignInProvider; label: string; icon: SimpleIcon }> = [
   { id: 'google', label: 'Google', icon: siGoogle },
   { id: 'facebook', label: 'Facebook', icon: siFacebook },
-  // X is the current mark for the same provider; the bird is no longer published.
   { id: 'twitter', label: 'Twitter', icon: siX },
 ];
 
 type Props = {
-  /** True once this browser has spent the guest allowance. */
+
   guestExhausted: boolean;
   onSignedIn: () => void;
 };
 
 export function AuthPanel({ guestExhausted, onSignedIn }: Props) {
-  // A failed provider sign-in is reported back through the address bar, and this is the
-  // screen that should say so.
   const [error, setError] = useState<string | null>(authRedirectError());
   const [busy, setBusy] = useState(false);
 
@@ -66,8 +60,8 @@ export function AuthPanel({ guestExhausted, onSignedIn }: Props) {
               window.location.href = providerSignInUrl(provider.id);
             }}
           >
-            {/* Decorative: the label beside it carries the name. */}
-            <svg className="brand-icon" viewBox="0 0 24 24" aria-hidden="true">
+
+            <svg className="brand-icon" viewBox="0 0 24 24">
               <path d={provider.icon.path} />
             </svg>
             {provider.label}

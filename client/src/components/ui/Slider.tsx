@@ -6,20 +6,16 @@ type Props = {
   max: number;
   value: number;
   onChange: (value: number) => void;
-  /** Granularity of the control, in the option's own units. */
+
   step?: number;
-  /** Hover text describing what the option does. */
+
   tooltip?: string;
-  /** Prints a value: used for the live reading and the two end captions. */
+
   format?: (value: number) => string;
   disabled?: boolean;
 };
 
-/**
- * A bounded adjustment. The reading sits beside the label and the two ends of
- * the range sit under the track, so the accepted values are visible without
- * hovering — the slider shows the range instead of a hint restating it.
- */
+// A bounded control that prints its live value and its limits.
 export function Slider({
   label,
   min,
@@ -44,14 +40,11 @@ export function Slider({
       <input
         className="slider"
         type="range"
-        aria-label={label}
         min={min}
         max={max}
         step={step}
         value={value}
         disabled={disabled}
-        // Drives the filled part of the track, so the accent ends exactly under
-        // the thumb rather than at a fixed width.
         style={{ '--fill': `${fraction * 100}%` } as CSSProperties}
         onChange={(event) => onChange(Number(event.target.value))}
       />

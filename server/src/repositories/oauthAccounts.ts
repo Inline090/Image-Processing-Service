@@ -13,9 +13,7 @@ export async function findAccount(
   return rows[0] ?? null;
 }
 
-// The conflict clause is a no-op update, which exists only so the statement always
-// returns the row: two callbacks arriving together would otherwise have one of them
-// fail on the unique pair rather than finding the link the other just made.
+// A no-op update on conflict, so the row always comes back.
 export async function linkAccount(
   userId: string,
   provider: string,

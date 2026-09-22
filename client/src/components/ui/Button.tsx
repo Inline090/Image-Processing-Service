@@ -7,6 +7,7 @@ type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
   children: ReactNode;
 };
 
+// Four variants, one size.
 export function Button({
   variant = 'ghost',
   type = 'button',

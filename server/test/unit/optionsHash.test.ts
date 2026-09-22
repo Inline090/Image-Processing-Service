@@ -9,9 +9,6 @@ function hash(options: TransformInput): string {
   return hashTransformOptions(IMAGE, options);
 }
 
-// Every option has to reach the cache key. When one does not, two different
-// transformations collide and the stored result of the first is served for the
-// second, which is the worst failure this service can have.
 const discriminating: Array<[string, TransformInput]> = [
   ['width', { width: 200 }],
   ['height', { height: 200 }],

@@ -9,8 +9,6 @@ export const authRouter = Router();
 authRouter.post('/guest', guestRateLimit, guest);
 authRouter.get('/me', requireAuth, me);
 
-// A provider sign-in is two full page navigations rather than a request: the browser
-// leaves for the provider and comes back, which is why both reply with a redirect.
 authRouter.get('/google', authRateLimit, startProvider('google'));
 authRouter.get('/google/callback', authRateLimit, finishProvider('google'));
 

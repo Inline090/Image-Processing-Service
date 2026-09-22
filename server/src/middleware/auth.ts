@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { verifyToken } from '../utils/jwt.js';
 import { AppError } from './error.js';
 
+// Reads the bearer token and answers 401 when it is missing or expired.
 export function requireAuth(req: Request, _res: Response, next: NextFunction): void {
   const [scheme, token] = (req.headers.authorization ?? '').split(' ');
 

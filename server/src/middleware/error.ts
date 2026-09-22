@@ -15,6 +15,7 @@ export function notFound(req: Request, _res: Response, next: NextFunction): void
   next(new AppError(`Route not found: ${req.method} ${req.originalUrl}`, 404));
 }
 
+// One place for every error. 5xx messages stay generic, the detail goes to the log.
 export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction): void {
   const statusCode = resolveStatus(err);
   const isServerError = statusCode >= 500;

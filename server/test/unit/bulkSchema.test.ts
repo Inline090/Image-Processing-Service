@@ -24,8 +24,6 @@ describe('bulk transform schema', () => {
     assert.equal(result.success ? result.data.imageIds.length : 0, 2);
   });
 
-  // The cap is about work, so it counts after collapsing: the same id repeated is one
-  // image, not twenty.
   it('applies the cap after collapsing, not before', () => {
     const repeated = Array.from({ length: MAX_BULK_IMAGES * 2 }, () => uuid(1));
     const result = bulkTransformSchema.safeParse({ imageIds: repeated, options: {} });

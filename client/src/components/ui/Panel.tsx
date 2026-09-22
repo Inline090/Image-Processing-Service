@@ -8,6 +8,7 @@ type Props = {
   children: ReactNode;
 };
 
+// The card every screen is built from.
 export function Panel({ title, lede, kicker, actions, children }: Props) {
   return (
     <section className="panel">

@@ -2,8 +2,6 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createState, isStateValid } from '../../src/auth/state.js';
 
-// The state is what stops a callback being handed to us by somebody else, so it has to
-// survive a round trip and nothing else.
 describe('sign-in state', () => {
   it('accepts the value it just handed out', () => {
     assert.equal(isStateValid(createState()), true);
@@ -34,7 +32,6 @@ describe('sign-in state', () => {
   });
 
   it('rejects the values a callback actually arrives with when there is no state', () => {
-    // Undefined and null reach here whenever a provider returns without one.
     assert.equal(isStateValid(undefined), false);
     assert.equal(isStateValid(null), false);
   });

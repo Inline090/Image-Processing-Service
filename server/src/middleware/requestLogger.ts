@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { logger } from '../logger.js';
 
+// One log line per request, with its status and duration.
 export function requestLogger(req: Request, res: Response, next: NextFunction): void {
   const startedAt = process.hrtime.bigint();
 

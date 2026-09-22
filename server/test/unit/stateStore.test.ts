@@ -4,8 +4,6 @@ import type { Request } from 'express';
 import { statelessState } from '../../src/auth/passport.js';
 import { createState } from '../../src/auth/state.js';
 
-// The request is never read: the store works from the signature alone, which is the
-// whole reason it needs no session.
 const request = {} as unknown as Request;
 const meta = {
   authorizationURL: 'https://provider.test/authorize',
@@ -31,10 +29,6 @@ function verifyWith(state: string, arity: 3 | 4): boolean {
 
 describe('sign-in state store', () => {
   it('keeps the parameter counts the library dispatches on', () => {
-    // Passport picks how to call these by reading their arity: three for store and
-    // four for verify, which are the branches where the callback arrives last. An
-    // optional parameter still counts towards that, and the type allows two shapes,
-    // so one function answers both.
     assert.equal(statelessState.store.length, 3);
     assert.equal(statelessState.verify.length, 4);
   });

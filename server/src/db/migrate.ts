@@ -15,6 +15,7 @@ async function ensureMigrationsTable(): Promise<void> {
   `);
 }
 
+// Applied files are recorded by name, so re-running is safe.
 export async function runMigrations(): Promise<void> {
   await ensureMigrationsTable();
 

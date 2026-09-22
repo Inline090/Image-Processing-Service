@@ -2,9 +2,6 @@ import assert from 'node:assert/strict';
 import type { Server } from 'node:http';
 import { after, before, describe, it } from 'node:test';
 
-// Set before anything pulls in the config, so the app sees Google as configured and
-// Facebook and Twitter as bare. The modules below are imported dynamically for that
-// reason: a static import would be evaluated first, and the config is read on load.
 process.env.GOOGLE_CLIENT_ID = 'test-google-id';
 process.env.GOOGLE_CLIENT_SECRET = 'test-google-secret';
 process.env.OAUTH_CALLBACK_BASE = 'http://localhost:3000/api/auth';
@@ -54,8 +51,6 @@ async function seedPasswordAccount(email: string): Promise<string> {
   return rows[0]?.id ?? '';
 }
 
-// The exchange with the providers themselves is not covered: it needs a real account
-// and a network. Everything up to that point is, and that is where the mistakes are.
 describe('sign-in routes', () => {
   it('sends the browser to Google with a signed state', async () => {
     const response = await fetch(`${baseUrl}/api/auth/google`, { redirect: 'manual' });
@@ -72,7 +67,6 @@ describe('sign-in routes', () => {
     );
     assert.ok(destination.searchParams.get('scope')?.includes('email'), 'asks for the address');
 
-    // Signed: a nonce, a dot, and the signature over it.
     assert.match(destination.searchParams.get('state') ?? '', /^[0-9a-f]{32}\.[0-9a-f]{64}$/);
   });
 
@@ -164,8 +158,6 @@ describe('linking a provider account', () => {
   });
 
   it('invents an address for a provider that hands over none', () => {
-    // Twitter returns no address, and the column is required and unique, so the
-    // account is labelled with the provider and its id.
     assert.equal(
       accountEmail({ provider: 'twitter', providerId: '4242', email: null }),
       'twitter-4242@twitter.local',

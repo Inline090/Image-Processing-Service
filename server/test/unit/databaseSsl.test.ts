@@ -9,9 +9,6 @@ describe('database ssl', () => {
   });
 
   it('encrypts without checking the certificate when the mode says require', () => {
-    // The reason this module exists: Postgres reads `require` as "encrypt only",
-    // while the connection-string parser reads it as "encrypt and verify", so a
-    // hosted database ends up held to a test it never asked for.
     assert.deepEqual(sslOptionFor('postgres://u:p@host/db?sslmode=require'), {
       rejectUnauthorized: false,
     });

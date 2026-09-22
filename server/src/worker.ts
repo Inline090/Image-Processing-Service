@@ -38,8 +38,7 @@ async function pollOnce(): Promise<void> {
   try {
     const outcome = await processJob(job);
 
-    // A skipped job still leaves the queue. Either another consumer holds it or it is
-    // already done, and leaving it would only hand the same job to somebody else.
+    // Delete only after the work succeeds, so a failure comes back for a retry.
     await deleteJob(receiptHandle);
 
     logger.info(
@@ -65,8 +64,6 @@ function requestShutdown(signal: string): void {
 }
 
 async function main(): Promise<void> {
-  // Logged before anything is contacted, so a worker that never reaches the queue is
-  // distinguishable from one that is quietly waiting on it.
   logger.info('worker starting - contacting the queue');
 
   const queue = await ensureQueue();
@@ -90,8 +87,6 @@ async function main(): Promise<void> {
 }
 
 void main().catch((err: unknown) => {
-  // Said plainly rather than left as an unhandled rejection, because the usual cause is
-  // a setting rather than a bug: no credentials, or a queue this account cannot reach.
   logger.error({ err }, 'worker could not start');
   process.exit(1);
 });

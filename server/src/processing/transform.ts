@@ -4,9 +4,6 @@ import { DEFAULT_FIT, DEFAULT_QUALITY, DEFAULT_WATERMARK_POSITION } from './opti
 
 const DEFAULT_FLATTEN_BACKGROUND = '#ffffff';
 
-// sharp calls the centre gravity "centre". Attention and entropy are its two
-// smart-crop strategies: each scans the image and picks the region worth keeping
-// instead of assuming the middle.
 type ResizePosition = 'centre' | 'attention' | 'entropy';
 
 function focusPosition(focus: CropFocus): ResizePosition {
@@ -23,7 +20,6 @@ function focusPosition(focus: CropFocus): ResizePosition {
 
 export type ResizeFit = 'cover' | 'contain' | 'fill' | 'inside' | 'outside';
 
-/** What a resize keeps when it has to discard part of the image. */
 export type CropFocus = 'center' | 'attention' | 'entropy';
 
 export type OutputFormat = 'jpeg' | 'png' | 'webp' | 'avif';
@@ -154,9 +150,9 @@ export async function transformImage(
     throw new ImageTooLargeError(inputPixels, config.maxInputPixels);
   }
 
+  // autoOrient first, or a phone photo stays sideways once the metadata is dropped.
   let pipeline = sharp(input, { limitInputPixels: config.maxInputPixels }).autoOrient();
 
-  // Geometry, applied at the original resolution before any downscaling.
   if (options.rotate !== undefined) {
     pipeline =
       options.background === undefined
@@ -182,7 +178,6 @@ export async function transformImage(
     });
   }
 
-  // Colour work, after the resize so it runs on fewer pixels.
   if (options.modulate !== undefined) {
     pipeline = pipeline.modulate(options.modulate);
   }
@@ -195,16 +190,15 @@ export async function transformImage(
     pipeline = pipeline.grayscale().tint({ r: 112, g: 66, b: 20 });
   }
 
-  // Detail work last, so sharpening is not undone by the downscale.
   if (options.blur !== undefined) {
     pipeline = pipeline.blur(options.blur);
   }
 
+  // After the resize, so the downscale cannot undo it.
   if (options.sharpen !== undefined && options.sharpen !== false) {
     pipeline = options.sharpen === true ? pipeline.sharpen() : pipeline.sharpen(options.sharpen);
   }
 
-  // Mirroring, before the canvas is padded so the padding is never flipped.
   if (options.flip === true) {
     pipeline = pipeline.flip();
   }
@@ -230,6 +224,7 @@ export async function transformImage(
   }
 
   if (options.watermark !== undefined) {
+    // The overlay is sized from the real output, so watermarking runs the pipeline twice.
     const sized = await pipeline.toBuffer({ resolveWithObject: true });
     const overlay = watermarkOverlay(
       options.watermark.text,
@@ -255,8 +250,6 @@ export async function transformImage(
   } else if (options.format === 'webp') {
     pipeline = pipeline.webp({ quality, ...(effort === undefined ? {} : { effort }) });
   } else if (options.format === 'avif') {
-    // AVIF is a HEIF profile, so sharp exposes it as heif with AV1 compression
-    // rather than as a codec of its own.
     pipeline = pipeline.heif({
       compression: 'av1',
       quality,
@@ -268,9 +261,7 @@ export async function transformImage(
 
   return {
     buffer: data,
-    // sharp reports AVIF as "heif", which would store the wrong content type and
-    // make the download save as .bin, so the requested format wins when there is
-    // one and sharp's own report is the fallback.
+    // Sharp reports avif as heif, so the requested format wins when there is one.
     format: options.format ?? info.format,
     width: info.width,
     height: info.height,

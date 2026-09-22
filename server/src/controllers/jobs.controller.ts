@@ -45,13 +45,6 @@ export async function getJob(req: Request, res: Response): Promise<void> {
   });
 }
 
-/**
- * How a bulk request is getting on, counted from its own jobs.
- *
- * One query rather than one per image: a client showing progress on ten pictures should
- * not have to ask ten times. A batch nobody owns is a 404, the same answer a job
- * somebody else owns gets.
- */
 export async function getBatch(req: Request, res: Response): Promise<void> {
   const authUser = req.user;
   if (authUser === undefined) {
@@ -79,7 +72,6 @@ export async function getBatch(req: Request, res: Response): Promise<void> {
     processing: countOf('processing'),
     ready: countOf('ready'),
     failed: countOf('failed'),
-    // What the client is waiting for: every job has finished, either way.
     settled: jobs.every((job) => job.status === 'ready' || job.status === 'failed'),
     jobs: jobs.map((job) => ({
       id: job.id,

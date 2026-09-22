@@ -14,14 +14,8 @@ const watermarkPositions = [
 
 const formats = ['jpeg', 'png', 'webp', 'avif'] as const;
 
-// What a resize keeps when it has to discard part of the image. `center` is the
-// plain centre crop; the other two scan the image for the region worth keeping.
 const focusValues = ['center', 'attention', 'entropy'] as const;
 
-// Effort is the encoder's own knob, and only the lossy modern formats take one:
-// WebP stops at 6 and AVIF at 9, so 6 is the ceiling both accept. JPEG and PNG
-// have no such knob, and accepting a value there would mean quietly ignoring
-// something the caller asked for.
 const MAX_EFFORT = 6;
 
 function effortIsAllowed(options: { format?: string; effort?: number }): boolean {
@@ -32,10 +26,6 @@ function effortIsAllowed(options: { format?: string; effort?: number }): boolean
   return options.format === 'webp' || options.format === 'avif';
 }
 
-// A crop is taken out of the original, before any resizing, so its bound is the size of
-// the decoded image rather than an output size. That is already held down by
-// MAX_INPUT_PIXELS, so this only has to be large enough not to refuse a big photograph:
-// 4096 would reject the middle of anything over 4 megapixels.
 const MAX_CROP_EDGE = 20000;
 
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Expected a hex colour such as #ffffff');
