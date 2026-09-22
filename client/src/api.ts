@@ -1,6 +1,3 @@
-// The dev server proxies /api, and a same-origin deployment serves it from the same
-// place, so the default is a relative path. When the client lives on its own host it
-// names the api with VITE_API_URL, which Vite bakes in at build time.
 const API_ORIGIN = import.meta.env.VITE_API_URL ?? '';
 
 const BASE = `${API_ORIGIN}/api`;
@@ -13,14 +10,13 @@ export type Image = {
   createdAt: string;
   originalUrl: string;
   processedUrl: string | null;
-  /** True when the history was full, so this one is not kept there. */
-  ephemeral: boolean;
 };
 
 export type Job = {
   id: string;
   imageId: string;
   status: 'pending' | 'processing' | 'ready' | 'failed';
+  progress: number;
   attempts: number;
   error: string | null;
   format: string | null;
@@ -42,7 +38,6 @@ export type WatermarkPosition =
 
 export type OutputFormat = 'jpeg' | 'png' | 'webp' | 'avif';
 
-/** What a resize keeps when it has to discard part of the image. */
 export type CropFocus = 'center' | 'attention' | 'entropy';
 
 export type TransformOptions = {
@@ -80,8 +75,10 @@ export type TransformOptions = {
   effort?: number;
 };
 
+// The token lives in localStorage and travels as a bearer header.
 const TOKEN_KEY = 'ips.token';
 let token: string | null = localStorage.getItem(TOKEN_KEY);
+
 let unauthorizedHandler: (() => void) | null = null;
 
 export function hasToken(): boolean {
@@ -102,9 +99,6 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   unauthorizedHandler = handler;
 }
 
-// The server caps a guest account, but starting a fresh guest session would
-// hand out a new allowance. Remembering that this browser has spent its guest
-// quota is what keeps the cap meaningful; registering is the way forward.
 const GUEST_EXHAUSTED_KEY = 'ips.guestExhausted';
 
 export function isGuestExhausted(): boolean {
@@ -117,14 +111,7 @@ export function markGuestExhausted(): void {
 
 let authRedirectMessage: string | null = null;
 
-/**
- * A provider sign-in lands back on this page with its answer in the fragment: a token
- * when it worked, or a message when it did not. Called once at startup, before the app
- * decides whether it is signed in.
- *
- * The fragment is wiped either way - a token left in the address bar is a token in
- * the browser's history - and the message is left for the sign-in screen to show.
- */
+// Reads the token or the error out of the fragment and wipes it from the address bar.
 export function consumeAuthRedirect(): void {
   const hash = window.location.hash.slice(1);
   const separator = hash.indexOf('=');
@@ -145,8 +132,6 @@ export function consumeAuthRedirect(): void {
   }
 }
 
-// Read without clearing, so a second render in development still sees the message.
-// The sign-in screen clears it once the person does something.
 export function authRedirectError(): string | null {
   return authRedirectMessage;
 }
@@ -155,13 +140,23 @@ export function clearAuthRedirectError(): void {
   authRedirectMessage = null;
 }
 
-/** Where the browser goes to sign in with a provider. A page navigation, not a request. */
 export type SignInProvider = 'google' | 'facebook' | 'twitter';
 
 export function providerSignInUrl(provider: SignInProvider): string {
   return `${BASE}/auth/${provider}`;
 }
 
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+// Adds the token, and signs out on a 401 from anywhere but the auth routes.
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
 
@@ -172,10 +167,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
 
   try {
-    response = await fetch(`${BASE}${path}`, { ...init, headers });
+    response = await fetch(`${BASE}${path}`, { ...init, headers, credentials: 'include' });
   } catch {
-    // fetch only rejects when the request never arrived at all, so the wording
-    // below would be wrong: there is no status to report.
     throw new Error('Could not reach the server. Check your connection and try again.');
   }
 
@@ -189,26 +182,28 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       error?: { message?: string };
     } | null;
 
-    throw new Error(body?.error?.message ?? unhelpfulStatus(response.status));
+    throw new ApiError(body?.error?.message ?? unhelpfulStatus(response.status), response.status);
   }
 
   return (await response.json()) as T;
 }
 
-// Reached when the reply did not come from this API - a gateway or proxy page, or
-// a crash before the handler ran - so the caller gets plain words, not a number.
 function unhelpfulStatus(status: number): string {
   return status >= 500
     ? 'The service is having trouble right now. Please try again in a moment.'
     : `That request could not be completed (status ${status}).`;
 }
 
-export async function uploadImage(file: File): Promise<Image> {
-  const body = new FormData();
-  body.append('image', file);
+export const MAX_BATCH_IMAGES = 10;
 
-  const result = await request<{ image: Image }>('/images', { method: 'POST', body });
-  return result.image;
+export async function uploadImages(files: File[]): Promise<{ images: Image[]; dropped: number }> {
+  const body = new FormData();
+
+  for (const file of files) {
+    body.append('images', file);
+  }
+
+  return request<{ images: Image[]; dropped: number }>('/images/batch', { method: 'POST', body });
 }
 
 export async function transformImage(id: string, options: TransformOptions): Promise<Job> {
@@ -256,7 +251,7 @@ export type Batch = {
   processing: number;
   ready: number;
   failed: number;
-  /** True once every job has finished, either way. */
+
   settled: boolean;
   jobs: BatchJob[];
 };
@@ -264,7 +259,7 @@ export type Batch = {
 export type BulkResult = {
   batchId: string;
   queued: number;
-  /** Images needing no new work: the result existed, or was already being produced. */
+
   alreadyDone: number;
   jobs: Job[];
 };
@@ -308,11 +303,15 @@ export type Account = {
   id: string;
   email: string;
   createdAt: string;
+
+  avatarUrl: string | null;
   guest: boolean;
-  /** null for a registered account, which is not capped. */
+
   uploadLimit: number | null;
-  /** How much of the guest allowance has been spent. Deleting history does not lower it. */
+
   uploadsUsed: number;
+
+  emailable: boolean;
 };
 
 export async function getMe(): Promise<Account> {

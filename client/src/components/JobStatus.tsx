@@ -1,39 +1,36 @@
 import { useEffect, useRef, useState } from 'react';
-import { getJob, type DownloadVariant, type Job } from '../api';
+import { ApiError, getJob, type DownloadVariant, type Job } from '../api';
 import { downloadImage } from '../download';
 import { startPolling } from '../poll';
 import { Button } from './ui/Button';
+import { Loader } from './ui/Loader';
 import { Panel } from './ui/Panel';
 
-const PROGRESS: Record<Job['status'], number> = {
-  pending: 5,
-  processing: 50,
-  ready: 100,
-  failed: 100,
-};
-
+// Ready or failed both mean the card can stop polling.
 function isSettled(job: Job): boolean {
   return job.status === 'ready' || job.status === 'failed';
 }
 
 type Props = {
   jobId: string;
-  /** Fired once when the transform lands, so the history can pick the result up. */
+
   onReady?: () => void;
+
+  onMissing?: () => void;
 };
 
-export function JobStatus({ jobId, onReady }: Props) {
+export function JobStatus({ jobId, onReady, onMissing }: Props) {
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
-  // Held in a ref so a fresh inline callback from the parent does not restart
-  // the poll on every render.
   const onReadyRef = useRef(onReady);
+  const onMissingRef = useRef(onMissing);
 
   useEffect(() => {
     onReadyRef.current = onReady;
-  }, [onReady]);
+    onMissingRef.current = onMissing;
+  }, [onReady, onMissing]);
 
   useEffect(() => {
     let announced = false;
@@ -51,6 +48,11 @@ export function JobStatus({ jobId, onReady }: Props) {
         }
       },
       onError: (err) => {
+        if (err instanceof ApiError && err.status === 404) {
+          onMissingRef.current?.();
+          return;
+        }
+
         setError(err instanceof Error ? err.message : 'Could not load the job');
       },
     });
@@ -67,7 +69,7 @@ export function JobStatus({ jobId, onReady }: Props) {
 
   if (error !== null) {
     return (
-      <Panel title="Transform job">
+      <Panel title="Transform">
         <p className="notice">{error}</p>
       </Panel>
     );
@@ -75,20 +77,21 @@ export function JobStatus({ jobId, onReady }: Props) {
 
   return (
     <Panel
-      title="Transform job"
-      actions={job !== null ? <span className="code">{job.status}</span> : undefined}
+      title="Transform"
+      actions={
+        <span className="run-state">
+          {(job === null || !isSettled(job)) && <Loader size={16} />}
+
+          <span className="code">{job === null ? 'queued' : job.status}</span>
+        </span>
+      }
     >
       {job === null ? (
         <p className="status">Waiting for the first update...</p>
       ) : (
         <div className="group">
-          <p className="status tabular">
-            <span className="code">{job.id.slice(0, 8)}</span>
-            {job.attempts > 0 ? ` - attempt ${job.attempts}` : ''}
-          </p>
-
           <div className="progress">
-            <div className="progress-bar" style={{ width: `${PROGRESS[job.status]}%` }} />
+            <div className="progress-bar" style={{ width: `${job.progress}%` }} />
           </div>
 
           {job.error !== null && <p className="notice">{job.error}</p>}
@@ -102,7 +105,7 @@ export function JobStatus({ jobId, onReady }: Props) {
               )}
 
               <figure className="figure">
-                <img className="preview" src={job.processedUrl} alt="Transformed result" />
+                <img className="preview" src={job.processedUrl} />
                 <figcaption className="caption">Transformed output</figcaption>
               </figure>
 

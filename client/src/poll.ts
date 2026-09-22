@@ -6,9 +6,10 @@ export type PollOptions<T> = {
   fetch: () => Promise<T>;
   isSettled: (value: T) => boolean;
   onUpdate: (value: T) => void;
-  onError: (error: unknown) => void;
+  onError?: (error: unknown) => void;
 };
 
+// Polls with backoff and stops once the value has settled.
 export function startPolling<T>(options: PollOptions<T>): () => void {
   let cancelled = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -32,7 +33,7 @@ export function startPolling<T>(options: PollOptions<T>): () => void {
         return;
       }
 
-      options.onError(error);
+      options.onError?.(error);
       delay = MAX_DELAY_MS;
     }
 

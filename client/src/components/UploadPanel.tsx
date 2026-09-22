@@ -1,11 +1,21 @@
-import { useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type FormEvent,
+} from 'react';
+import { X } from 'lucide-react';
+import {
+  MAX_BATCH_IMAGES,
+  transformBulk,
   transformImage,
-  uploadImage,
+  uploadImages,
   type CropFocus,
-  type Job,
   type TransformOptions,
 } from '../api';
+import type { TransformRun } from '../run';
 import { Button } from './ui/Button';
 import { Field } from './ui/Field';
 import { Panel } from './ui/Panel';
@@ -15,32 +25,47 @@ const FORMATS = ['webp', 'avif', 'jpeg', 'png'] as const;
 
 type Format = (typeof FORMATS)[number];
 
-// Effort is the encoder's own knob. WebP stops at 6 and AVIF at 9, so 6 is the
-// ceiling both accept, and past it the encoder spends several times the time for
-// a couple of percent - the shared range is the useful part of both.
+type SizeMode = 'percent' | 'pixels';
+
 const MAX_EFFORT = 6;
 const DEFAULT_EFFORT = 4;
+
+const MAX_OUTPUT_EDGE = 4096;
+
+const DEFAULT_TRIM_THRESHOLD = 10;
+const MAX_TRIM_THRESHOLD = 100;
 
 function usesEffort(format: Format): boolean {
   return format === 'webp' || format === 'avif';
 }
 
-// What each focus strategy keeps. A native select renders its own dropdown, so a
-// title on an option is only shown by some browsers - the description of the
-// current choice has to be visible under the control to be reliable.
 const FOCUS_DESCRIPTIONS: Record<CropFocus, string> = {
   center: 'Keeps the middle of the image.',
   attention: 'Keeps the area that stands out most, such as a face or a bright subject.',
   entropy: 'Keeps the area holding the most detail.',
 };
 
+function focusHintFor(mode: SizeMode, hasCrop: boolean, focus: CropFocus): string {
+  if (mode === 'percent') {
+    return 'A percentage crops from the middle, so this does not apply.';
+  }
+
+  if (!hasCrop) {
+    return 'Nothing is cropped at this size, so this has no effect yet.';
+  }
+
+  return FOCUS_DESCRIPTIONS[focus];
+}
+
 type Props = {
   onJobQueued: (jobId: string) => void;
-  /**
-   * Fired once an upload has been accepted. A guest's allowance is spent by the
-   * upload itself, so the count is re-read from here rather than after the
-   * transform, which can still fail.
-   */
+
+  onRunQueued: (run: TransformRun) => void;
+
+  emailable: boolean;
+
+  uploadLimit: number | null;
+
   onUploaded: () => void;
 };
 
@@ -60,12 +85,43 @@ function round(value: number, places: number): number {
   return Math.round(value * factor) / factor;
 }
 
-// Every option's starting value, in one place: the state below starts from these
-// and Reset puts them all back, so the two cannot drift apart.
+function clampPercent(value: number): number {
+  return Math.min(100, Math.max(10, Math.round(value)));
+}
+
+function originalSize(size: { width: number; height: number } | null): {
+  width: string;
+  height: string;
+} {
+  if (size === null) {
+    return { width: '', height: '' };
+  }
+
+  return {
+    width: String(Math.min(size.width, MAX_OUTPUT_EDGE)),
+    height: String(Math.min(size.height, MAX_OUTPUT_EDGE)),
+  };
+}
+
+type PreviewItem = {
+  url: string;
+  name: string;
+};
+
+function fileNameLabel(picked: File[]): string {
+  if (picked.length === 0) {
+    return 'No image selected';
+  }
+
+  return picked.length === 1 ? picked[0].name : `${picked.length} images selected`;
+}
+
 const DEFAULTS = {
   crop: false,
-  keep: 100,
-  width: '400',
+  sizeMode: 'pixels' as SizeMode,
+  keepWidth: 100,
+  keepHeight: 100,
+  width: '',
   height: '',
   focus: 'center' as CropFocus,
   format: 'webp' as Format,
@@ -84,22 +140,27 @@ const DEFAULTS = {
   flip: false,
   flop: false,
   trim: false,
+  trimThreshold: DEFAULT_TRIM_THRESHOLD,
   pad: '',
   useBackground: false,
   background: '#ffffff',
   flatten: false,
 };
 
-// Every option carries a tooltip saying what it does. The ones that take a
-// bounded value are sliders, whose end captions state the range; the ones that
-// take a plain measurement stay number fields, whose hint states it.
-export function UploadPanel({ onJobQueued, onUploaded }: Props) {
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+export function UploadPanel({
+  onJobQueued,
+  onRunQueued,
+  emailable,
+  uploadLimit,
+  onUploaded,
+}: Props) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const [previews, setPreviews] = useState<PreviewItem[]>([]);
   const [crop, setCrop] = useState(DEFAULTS.crop);
-  const [keep, setKeep] = useState(DEFAULTS.keep);
-  // Measured from the picked file, because a percentage has to become pixels before it
-  // can be sent: the crop is taken from the original, and only the browser knows its size.
+  const [sizeMode, setSizeMode] = useState<SizeMode>(DEFAULTS.sizeMode);
+  const [keepWidth, setKeepWidth] = useState(DEFAULTS.keepWidth);
+  const [keepHeight, setKeepHeight] = useState(DEFAULTS.keepHeight);
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
   const [width, setWidth] = useState(DEFAULTS.width);
   const [height, setHeight] = useState(DEFAULTS.height);
@@ -120,24 +181,46 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
   const [flip, setFlip] = useState(DEFAULTS.flip);
   const [flop, setFlop] = useState(DEFAULTS.flop);
   const [trim, setTrim] = useState(DEFAULTS.trim);
+  const [trimThreshold, setTrimThreshold] = useState(DEFAULTS.trimThreshold);
   const [pad, setPad] = useState(DEFAULTS.pad);
   const [useBackground, setUseBackground] = useState(DEFAULTS.useBackground);
   const [background, setBackground] = useState(DEFAULTS.background);
   const [flatten, setFlatten] = useState(DEFAULTS.flatten);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [job, setJob] = useState<Job | null>(null);
-  const [notKept, setNotKept] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [emailNotice, setEmailNotice] = useState(false);
+
+  const liveMode: SizeMode = imageSize === null ? 'pixels' : sizeMode;
+
+  const paintsBackground = flatten || Number(pad) > 0;
+
+  const focusSize = {
+    width: parseNumber(width, 1, MAX_OUTPUT_EDGE),
+    height: parseNumber(height, 1, MAX_OUTPUT_EDGE),
+  };
+
+  const focusHasACrop =
+    imageSize !== null &&
+    focusSize.width !== undefined &&
+    focusSize.height !== undefined &&
+    Math.abs(focusSize.width / focusSize.height - imageSize.width / imageSize.height) > 0.01;
+
+  const focusHint = focusHintFor(liveMode, focusHasACrop, focus);
 
   const fileInput = useRef<HTMLInputElement>(null);
+  const addInput = useRef<HTMLInputElement>(null);
 
-  // Puts every option back to its starting value. The picked image, the job and
-  // the notice about the history are not settings, so they are left alone.
   function resetSettings(): void {
+    const fields = originalSize(imageSize);
+
     setCrop(DEFAULTS.crop);
-    setKeep(DEFAULTS.keep);
-    setWidth(DEFAULTS.width);
-    setHeight(DEFAULTS.height);
+    setSizeMode(DEFAULTS.sizeMode);
+    setKeepWidth(DEFAULTS.keepWidth);
+    setKeepHeight(DEFAULTS.keepHeight);
+    setWidth(fields.width);
+    setHeight(fields.height);
     setFocus(DEFAULTS.focus);
     setFormat(DEFAULTS.format);
     setQuality(DEFAULTS.quality);
@@ -155,106 +238,275 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
     setFlip(DEFAULTS.flip);
     setFlop(DEFAULTS.flop);
     setTrim(DEFAULTS.trim);
+    setTrimThreshold(DEFAULTS.trimThreshold);
     setPad(DEFAULTS.pad);
     setUseBackground(DEFAULTS.useBackground);
     setBackground(DEFAULTS.background);
     setFlatten(DEFAULTS.flatten);
 
-    // A message about the last attempt no longer describes the form on screen.
     setError(null);
   }
 
-  function releasePreview(): void {
-    if (preview !== null) {
-      URL.revokeObjectURL(preview);
+  function releasePreviews(): void {
+    for (const item of previews) {
+      URL.revokeObjectURL(item.url);
     }
 
-    setPreview(null);
+    setPreviews([]);
   }
 
   function clearPickedFile(): void {
-    setFile(null);
+    setFiles([]);
     setImageSize(null);
-    releasePreview();
+    releasePreviews();
 
     if (fileInput.current !== null) {
       fileInput.current.value = '';
     }
   }
 
-  // createImageBitmap applies the file's own orientation, which is what sharp does when
-  // it reads the image too, so a percentage lines up with what the worker will crop.
-  async function measureImage(picked: File): Promise<void> {
+  // createImageBitmap applies EXIF rotation, the same way sharp reads the file.
+  async function measure(picked: File): Promise<{ width: number; height: number } | null> {
     try {
       const bitmap = await createImageBitmap(picked);
+      const size = { width: bitmap.width, height: bitmap.height };
 
-      setImageSize({ width: bitmap.width, height: bitmap.height });
       bitmap.close();
+
+      return size;
     } catch {
-      // The size could not be read, so a percentage cannot be worked out. The control
-      // is simply not offered, and the crop is left out.
-      setImageSize(null);
+      return null;
     }
+  }
+
+  async function measureImage(picked: File): Promise<void> {
+    const size = await measure(picked);
+    const fields = originalSize(size);
+
+    setImageSize(size);
+    setWidth(fields.width);
+    setHeight(fields.height);
+    setKeepWidth(DEFAULTS.keepWidth);
+    setKeepHeight(DEFAULTS.keepHeight);
+  }
+
+  function changeKeepWidth(next: number): void {
+    setKeepWidth(next);
+
+    if (imageSize !== null) {
+      setWidth(String(Math.max(1, Math.round((imageSize.width * next) / 100))));
+    }
+  }
+
+  function changeKeepHeight(next: number): void {
+    setKeepHeight(next);
+
+    if (imageSize !== null) {
+      setHeight(String(Math.max(1, Math.round((imageSize.height * next) / 100))));
+    }
+  }
+
+  function changeWidth(next: string): void {
+    setWidth(next);
+
+    const parsed = parseNumber(next, 1, 20000);
+
+    if (parsed !== undefined && imageSize !== null) {
+      setKeepWidth(clampPercent((parsed / imageSize.width) * 100));
+    }
+  }
+
+  function changeHeight(next: string): void {
+    setHeight(next);
+
+    const parsed = parseNumber(next, 1, 20000);
+
+    if (parsed !== undefined && imageSize !== null) {
+      setKeepHeight(clampPercent((parsed / imageSize.height) * 100));
+    }
+  }
+
+  function changeSizeMode(next: SizeMode): void {
+    if (next === sizeMode) {
+      return;
+    }
+
+    if (imageSize !== null) {
+      if (next === 'percent') {
+        const parsedWidth = parseNumber(width, 1, 20000);
+        const parsedHeight = parseNumber(height, 1, 20000);
+
+        if (parsedWidth !== undefined) {
+          setKeepWidth(clampPercent((parsedWidth / imageSize.width) * 100));
+        }
+
+        if (parsedHeight !== undefined) {
+          setKeepHeight(clampPercent((parsedHeight / imageSize.height) * 100));
+        }
+      } else {
+        setWidth(String(Math.max(1, Math.round((imageSize.width * keepWidth) / 100))));
+        setHeight(String(Math.max(1, Math.round((imageSize.height * keepHeight) / 100))));
+      }
+    }
+
+    setSizeMode(next);
+  }
+
+  function acceptFiles(picked: File[]): void {
+    const batch = picked.slice(0, MAX_BATCH_IMAGES);
+    const first = batch[0];
+
+    if (first === undefined) {
+      return;
+    }
+
+    if (batch.length < picked.length) {
+      setError(`At most ${MAX_BATCH_IMAGES} images at a time. The rest were left out.`);
+    }
+
+    releasePreviews();
+    setFiles(batch);
+    setImageSize(null);
+    setSummary(null);
+    setEmailNotice(false);
+    setProgress(null);
+
+    setPreviews(batch.map((file) => ({ url: URL.createObjectURL(file), name: file.name })));
+    void measureImage(first);
   }
 
   function handleFile(event: ChangeEvent<HTMLInputElement>): void {
-    const picked = event.target.files?.[0] ?? null;
+    acceptFiles(Array.from(event.target.files ?? []));
+  }
 
-    releasePreview();
-    setFile(picked);
-    setJob(null);
-    setNotKept(false);
-    setImageSize(null);
+  function appendFiles(picked: File[]): void {
+    const combined = [...files, ...picked];
+    const batch = combined.slice(0, MAX_BATCH_IMAGES);
+    const added = batch.slice(files.length);
 
-    if (picked !== null) {
-      setPreview(URL.createObjectURL(picked));
-      void measureImage(picked);
+    if (added.length === 0) {
+      return;
+    }
+
+    if (batch.length < combined.length) {
+      setError(`At most ${MAX_BATCH_IMAGES} images at a time. The rest were left out.`);
+    }
+
+    setFiles(batch);
+    setSummary(null);
+    setEmailNotice(false);
+    setProgress(null);
+    setPreviews((current) => [
+      ...current,
+      ...added.map((file) => ({ url: URL.createObjectURL(file), name: file.name })),
+    ]);
+  }
+
+  function handleAdd(event: ChangeEvent<HTMLInputElement>): void {
+    appendFiles(Array.from(event.target.files ?? []));
+    event.target.value = '';
+  }
+
+  function removeFile(index: number): void {
+    const removed = previews[index];
+
+    if (removed !== undefined) {
+      URL.revokeObjectURL(removed.url);
+    }
+
+    const remaining = files.filter((_, position) => position !== index);
+
+    setFiles(remaining);
+    setPreviews(previews.filter((_, position) => position !== index));
+    setSummary(null);
+    setEmailNotice(false);
+    setProgress(null);
+
+    if (index === 0) {
+      setImageSize(null);
+
+      const next = remaining[0];
+
+      if (next === undefined) {
+        setWidth(DEFAULTS.width);
+        setHeight(DEFAULTS.height);
+      } else {
+        void measureImage(next);
+      }
     }
   }
 
-  function buildOptions(): TransformOptions {
+  function handleDragOver(event: DragEvent<HTMLLabelElement>): void {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setDragging(true);
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLLabelElement>): void {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return;
+    }
+
+    setDragging(false);
+  }
+
+  function handleDrop(event: DragEvent<HTMLLabelElement>): void {
+    event.preventDefault();
+    setDragging(false);
+    acceptFiles(Array.from(event.dataTransfer.files));
+  }
+
+  useEffect(() => {
+    function block(event: Event): void {
+      event.preventDefault();
+      setDragging(false);
+    }
+
+    window.addEventListener('dragover', block);
+    window.addEventListener('drop', block);
+
+    return () => {
+      window.removeEventListener('dragover', block);
+      window.removeEventListener('drop', block);
+    };
+  }, []);
+
+  // Only changed options are sent, so the cache key stays stable.
+  function buildOptions(size: { width: number; height: number } | null): TransformOptions {
     const options: TransformOptions = { format, quality: Math.round(quality) };
 
-    // Only the two lossy modern encoders take an effort setting.
     if (usesEffort(format)) {
       options.effort = effort;
     }
 
     if (crop) {
-      // The middle `keep` percent of the image, as an equal inset on all four sides.
-      // Worked out here because the API takes a region in pixels.
-      if (keep < 100 && imageSize !== null) {
-        const insetX = Math.round((imageSize.width * (100 - keep)) / 200);
-        const insetY = Math.round((imageSize.height * (100 - keep)) / 200);
+      if (sizeMode === 'percent' && size !== null) {
+        if (keepWidth < 100 || keepHeight < 100) {
+          const cropWidth = Math.max(1, Math.round((size.width * keepWidth) / 100));
+          const cropHeight = Math.max(1, Math.round((size.height * keepHeight) / 100));
 
-        options.crop = {
-          left: insetX,
-          top: insetY,
-          width: Math.max(1, imageSize.width - insetX * 2),
-          height: Math.max(1, imageSize.height - insetY * 2),
-        };
-      }
+          options.crop = {
+            left: Math.round((size.width - cropWidth) / 2),
+            top: Math.round((size.height - cropHeight) / 2),
+            width: cropWidth,
+            height: cropHeight,
+          };
+        }
+      } else {
+        const parsedWidth = parseNumber(width, 1, 4096);
+        if (parsedWidth !== undefined) {
+          options.width = Math.round(parsedWidth);
+        }
 
-      const parsedWidth = parseNumber(width, 1, 4096);
-      if (parsedWidth !== undefined) {
-        options.width = Math.round(parsedWidth);
-      }
+        const parsedHeight = parseNumber(height, 1, 4096);
+        if (parsedHeight !== undefined) {
+          options.height = Math.round(parsedHeight);
+        }
 
-      const parsedHeight = parseNumber(height, 1, 4096);
-      if (parsedHeight !== undefined) {
-        options.height = Math.round(parsedHeight);
-      }
-
-      // The centre is what the resize does anyway, so only the region-picking
-      // strategies are worth sending.
-      if (focus !== 'center') {
         options.focus = focus;
       }
     }
 
-    // A slider always carries a value, so "unchanged" is expressed by leaving the
-    // option out. At its neutral value an adjustment is a no-op for the image,
-    // and sending it would only fragment the cache key.
     const modulate: NonNullable<TransformOptions['modulate']> = {};
 
     if (brightness !== 1) {
@@ -277,7 +529,6 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
       options.modulate = modulate;
     }
 
-    // Zero is the off position; the API's minimum radius is 0.3.
     if (blur > 0) {
       options.blur = round(blur, 1);
     }
@@ -295,7 +546,8 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
     }
 
     if (trim) {
-      options.trim = true;
+      options.trim =
+        trimThreshold === DEFAULT_TRIM_THRESHOLD ? true : { threshold: Math.round(trimThreshold) };
     }
 
     if (useBackground) {
@@ -328,29 +580,87 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
     return options;
   }
 
+  // One upload for the whole batch, then one transform per path taken.
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
 
-    if (file === null) {
+    if (files.length === 0) {
       setError('Pick an image first');
       return;
     }
 
     setError(null);
+    setSummary(null);
+    setEmailNotice(false);
     setBusy(true);
 
     try {
-      const image = await uploadImage(file);
-      clearPickedFile();
-      setNotKept(image.ephemeral);
-      onUploaded();
+      setProgress(`Uploading ${files.length} ${files.length === 1 ? 'image' : 'images'}`);
 
-      const queued = await transformImage(image.id, buildOptions());
-      setJob(queued);
-      onJobQueued(queued.id);
+      const { images, dropped } = await uploadImages(files);
+
+      const accepted = images.flatMap((image, index) => {
+        const picked = files[index];
+
+        if (picked === undefined) {
+          return [];
+        }
+
+        return [{ file: picked, id: image.id }];
+      });
+
+      clearPickedFile();
+      onUploaded();
+      setProgress(null);
+
+      const single = accepted[0];
+
+      if (dropped === 0 && accepted.length === 1 && single !== undefined) {
+        const queued = await transformImage(single.id, buildOptions(imageSize));
+
+        onJobQueued(queued.id);
+      } else if (crop && liveMode === 'percent') {
+        const jobIds: string[] = [];
+
+        for (const item of accepted) {
+          setProgress(`Queued ${jobIds.length + 1} of ${accepted.length}`);
+
+          const job = await transformImage(item.id, buildOptions(await measure(item.file)));
+          jobIds.push(job.id);
+        }
+
+        if (jobIds.length > 0) {
+          onRunQueued({ kind: 'jobs', jobIds });
+        }
+      } else {
+        const result = await transformBulk(
+          accepted.map((each) => each.id),
+          buildOptions(null),
+        );
+
+        if (result.queued > 0) {
+          onRunQueued({ kind: 'batch', batchId: result.batchId });
+        }
+
+        setSummary(
+          `Queued ${result.queued} of ${accepted.length}` +
+            (result.alreadyDone > 0 ? `, ${result.alreadyDone} already done` : ''),
+        );
+
+        setEmailNotice(dropped === 0 && result.queued > 0);
+      }
+
+      if (dropped > 0) {
+        setError(
+          `Uploaded ${images.length} of ${files.length}.` +
+            (uploadLimit === null ? '' : ` A guest account can upload ${uploadLimit} in total.`) +
+            ' Sign in to upload more.',
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
+      setProgress(null);
       setBusy(false);
     }
   }
@@ -370,34 +680,77 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
     >
       <form onSubmit={handleSubmit}>
         <div className="group">
-          {/* Not the Field primitive: that renders a <label>, and the file input
-              needs a label of its own, so nesting them would be invalid. */}
+
           <div
             className="field"
-            title="The image to transform. PNG, JPEG, WebP or GIF, up to 10 MB."
+            title="The images to transform. PNG, JPEG, WebP or GIF, up to 10 MB each."
           >
-            <span className="field-label label">Image</span>
+            <span className="field-label label">Images</span>
 
-            <label className="file-field">
-              <span className="file-chip" aria-hidden="true">
-                Choose image
+            <label
+              className={dragging ? 'file-field file-field--over' : 'file-field'}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              <span className="file-chip">
+                {dragging ? 'Drop to add' : 'Choose images'}
               </span>
-              <span className="file-name">{file === null ? 'No image selected' : file.name}</span>
+              <span className="file-name">{fileNameLabel(files)}</span>
               <input
                 className="file-input"
                 type="file"
                 accept="image/*"
-                aria-label="Image"
+                multiple
                 ref={fileInput}
                 onChange={handleFile}
               />
             </label>
 
-            <span className="field-hint">PNG, JPEG, WebP or GIF &middot; max 10 MB</span>
+            <span className="field-hint">PNG, JPEG, WebP or GIF, up to 10 MB</span>
           </div>
 
-          {preview !== null && (
-            <img className="preview preview--thumb" src={preview} alt="Selected upload preview" />
+          {previews.length > 0 && (
+            <ul className="picked-grid">
+              {previews.map((item, index) => (
+                <li key={item.url}>
+                  <img className="picked-thumb" src={item.url} />
+
+                  <button
+                    type="button"
+                    className="picked-remove icon-btn icon-btn--danger"
+                    title="Remove this image from the batch."
+                    onClick={() => removeFile(index)}
+                  >
+                    <X size={14} strokeWidth={1.5} />
+                  </button>
+
+                  <span className="picked-name">{item.name}</span>
+                </li>
+              ))}
+
+              {files.length < MAX_BATCH_IMAGES && (
+                <li>
+                  <button
+                    type="button"
+                    className="picked-add"
+                    onClick={() => addInput.current?.click()}
+                  >
+                    +
+                  </button>
+                  <input
+                    className="file-input"
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    tabIndex={-1}
+                    ref={addInput}
+                    onChange={handleAdd}
+                  />
+                  <span className="picked-name">Add more</span>
+                </li>
+              )}
+            </ul>
           )}
         </div>
 
@@ -405,26 +758,68 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
           <legend>Transform</legend>
 
           <div className="group">
-            <label className="inline" title="Resize the image to the width and height below.">
+            <label
+              className="inline"
+              title="Change the output size, either as a percentage of the original or as exact pixels."
+            >
               <input
                 type="checkbox"
                 checked={crop}
                 onChange={(event) => setCrop(event.target.checked)}
               />
-              Crop
+              Resize
             </label>
 
             {crop && imageSize !== null && (
-              <Slider
-                label="Keep"
-                tooltip="Crops to the middle of the image. 100% keeps all of it, 50% keeps the middle half."
-                min={10}
-                max={100}
-                step={1}
-                value={keep}
-                onChange={setKeep}
-                format={(value) => `${Math.round(value)}%`}
-              />
+              <div className="pairs">
+                <label className="inline" title="Crop to a percentage of the original.">
+                  <input
+                    type="radio"
+                    name="sizeMode"
+                    checked={liveMode === 'percent'}
+                    onChange={() => changeSizeMode('percent')}
+                  />
+                  By percent
+                </label>
+
+                <label className="inline" title="Resize to an exact pixel width and height.">
+                  <input
+                    type="radio"
+                    name="sizeMode"
+                    checked={liveMode === 'pixels'}
+                    onChange={() => changeSizeMode('pixels')}
+                  />
+                  By pixels
+                </label>
+              </div>
+            )}
+
+            {crop && imageSize !== null && (
+              <>
+                <Slider
+                  label="Width %"
+                  tooltip="How much of the width to keep, taken from the middle."
+                  min={10}
+                  max={100}
+                  step={1}
+                  value={keepWidth}
+                  disabled={liveMode !== 'percent'}
+                  onChange={changeKeepWidth}
+                  format={(value) => `${Math.round(value)}%`}
+                />
+
+                <Slider
+                  label="Height %"
+                  tooltip="How much of the height to keep, taken from the middle."
+                  min={10}
+                  max={100}
+                  step={1}
+                  value={keepHeight}
+                  disabled={liveMode !== 'percent'}
+                  onChange={changeKeepHeight}
+                  format={(value) => `${Math.round(value)}%`}
+                />
+              </>
             )}
 
             <div className="pairs">
@@ -432,40 +827,42 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
                 <>
                   <Field
                     label="Width"
-                    tooltip="Target width in pixels. Left blank, the width is left alone."
-                    hint="1-4096 px"
+                    tooltip="The width of the result, in pixels."
+                    hint={liveMode === 'percent' ? 'from the sliders' : '1-4096 px'}
                   >
                     <input
                       type="number"
                       min="1"
                       max="4096"
                       value={width}
-                      onChange={(event) => setWidth(event.target.value)}
+                      disabled={liveMode === 'percent'}
+                      onChange={(event) => changeWidth(event.target.value)}
                     />
                   </Field>
 
                   <Field
                     label="Height"
-                    tooltip="Target height in pixels. Leave blank to keep the original aspect ratio."
-                    hint="1-4096 px &middot; blank keeps the ratio"
+                    tooltip="The height of the result, in pixels."
+                    hint={liveMode === 'percent' ? 'from the sliders' : '1-4096 px'}
                   >
                     <input
                       type="number"
                       min="1"
                       max="4096"
-                      placeholder="auto"
                       value={height}
-                      onChange={(event) => setHeight(event.target.value)}
+                      disabled={liveMode === 'percent'}
+                      onChange={(event) => changeHeight(event.target.value)}
                     />
                   </Field>
 
                   <Field
                     label="Focus"
-                    tooltip="What the crop keeps: the middle, the busiest area, or the most detailed area."
-                    hint={FOCUS_DESCRIPTIONS[focus]}
+                    tooltip="What the resize keeps when it has to discard part of the image."
+                    hint={focusHint}
                   >
                     <select
                       value={focus}
+                      disabled={liveMode === 'percent'}
                       onChange={(event) => setFocus(event.target.value as CropFocus)}
                     >
                       <option value="center" title={FOCUS_DESCRIPTIONS.center}>
@@ -500,16 +897,18 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
               </Field>
             </div>
 
-            <Slider
-              label="Quality"
-              tooltip="Encoder quality for JPEG, WebP and AVIF. PNG is lossless and ignores it."
-              min={1}
-              max={100}
-              step={1}
-              value={quality}
-              onChange={setQuality}
-              format={(value) => String(Math.round(value))}
-            />
+            {format !== 'png' && (
+              <Slider
+                label="Quality"
+                tooltip="Encoder quality for JPEG, WebP and AVIF."
+                min={1}
+                max={100}
+                step={1}
+                value={quality}
+                onChange={setQuality}
+                format={(value) => String(Math.round(value))}
+              />
+            )}
 
             {usesEffort(format) && (
               <Slider
@@ -531,6 +930,7 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
               <input
                 type="checkbox"
                 checked={grayscale}
+                disabled={sepia}
                 onChange={(event) => setGrayscale(event.target.checked)}
               />
               Grayscale
@@ -540,6 +940,7 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
               <input
                 type="checkbox"
                 checked={sepia}
+                disabled={grayscale}
                 onChange={(event) => setSepia(event.target.checked)}
               />
               Sepia
@@ -548,7 +949,7 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
             <Field
               label="Watermark"
               tooltip="Text stamped onto the result, drawn over the bottom right corner."
-              hint="1-64 characters &middot; blank adds none"
+              hint="1-64 characters"
             >
               <input
                 type="text"
@@ -582,6 +983,7 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
               max={10}
               step={0.1}
               value={saturation}
+              disabled={grayscale || sepia}
               onChange={setSaturation}
               format={(value) => value.toFixed(1)}
             />
@@ -593,6 +995,7 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
               max={360}
               step={1}
               value={hue}
+              disabled={grayscale || sepia}
               onChange={setHue}
               format={(value) => `${Math.round(value)}°`}
             />
@@ -653,6 +1056,7 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
               <input
                 type="checkbox"
                 checked={flip}
+                disabled={flop}
                 onChange={(event) => setFlip(event.target.checked)}
               />
               Flip vertically
@@ -662,6 +1066,7 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
               <input
                 type="checkbox"
                 checked={flop}
+                disabled={flip}
                 onChange={(event) => setFlop(event.target.checked)}
               />
               Flop horizontally
@@ -679,6 +1084,19 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
               Trim uniform borders
             </label>
 
+            {trim && (
+              <Slider
+                label="Trim threshold"
+                tooltip="How far a pixel may differ from the border colour and still count as border. Raise it for a JPEG, whose border compression smears."
+                min={0}
+                max={MAX_TRIM_THRESHOLD}
+                step={1}
+                value={trimThreshold}
+                onChange={setTrimThreshold}
+                format={(value) => String(Math.round(value))}
+              />
+            )}
+
             <label
               className="inline"
               title="Lay transparency onto the background colour instead of keeping it."
@@ -695,7 +1113,7 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
               <Field
                 label="Pad (px)"
                 tooltip="Add a border of this many pixels on every side of the image."
-                hint="1-4096 px &middot; blank = off"
+                hint="1-4096 px"
               >
                 <input
                   type="number"
@@ -709,7 +1127,7 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
 
               <Field
                 label="Background"
-                tooltip="The colour used for padding, letterboxing and flattening."
+                tooltip="The colour used for padding and flattening."
                 hint="Any hex colour"
               >
                 <span className="color-field">
@@ -717,10 +1135,10 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
                     className="color-input"
                     type="color"
                     value={background}
-                    disabled={!useBackground}
+                    disabled={!useBackground || !paintsBackground}
                     onChange={(event) => setBackground(event.target.value)}
                   />
-                  <span className="color-wheel" aria-hidden="true" />
+                  <span className="color-wheel" />
                 </span>
               </Field>
             </div>
@@ -734,7 +1152,7 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
                 checked={useBackground}
                 onChange={(event) => setUseBackground(event.target.checked)}
               />
-              Use the background for padding, letterboxing and flattening
+              Use the background for padding and flattening
             </label>
           </div>
         </fieldset>
@@ -744,26 +1162,25 @@ export function UploadPanel({ onJobQueued, onUploaded }: Props) {
             type="submit"
             variant="primary"
             disabled={busy}
-            title="Upload the image and queue the transform for the worker."
+            title="Upload the images and queue the transform for the worker."
           >
             {busy ? 'Uploading...' : 'Upload'}
           </Button>
 
           {error !== null && <p className="notice">{error}</p>}
 
-          {notKept && (
+          {progress !== null && <p className="status">{progress}</p>}
+
+          {summary !== null && <p className="status">{summary}</p>}
+
+          {emailNotice && (
             <p className="notice notice--info">
-              Your history is full, so this result is not kept. Download it from the job below, or
-              delete an image from your history to make room.
+              {emailable
+                ? "Upload complete. Your images are being processed. You can close this tab; we'll email you when they're ready."
+                : 'Upload complete. Your images are being processed. You can close this tab. Sign in with Google or Facebook to be notified by email.'}
             </p>
           )}
 
-          {job !== null && (
-            <p className="status">
-              Queued job <code className="code">{job.id}</code> - status{' '}
-              <strong>{job.status}</strong>
-            </p>
-          )}
         </div>
       </form>
     </Panel>
