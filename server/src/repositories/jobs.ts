@@ -6,17 +6,11 @@ export type NewJob = {
   userId: string;
   options: unknown;
   optionsHash: string;
-  /** Shared by every job of one bulk request; null for a single transform. */
+
   batchId?: string | null;
 };
 
-/**
- * Queues a job, unless one is already live for this image and these options.
- *
- * Returns null when the unique index refused the row, which means another request got
- * there first. The caller is expected to adopt that job rather than start the same
- * work again - see findLiveJob.
- */
+// The partial unique index rejects a second live job for the same image and options.
 export async function createJob({
   imageId,
   userId,
@@ -37,12 +31,6 @@ export async function createJob({
   return rows[0] ?? null;
 }
 
-/**
- * Every job of one bulk request, oldest first so the order matches the request.
- *
- * Scoped by user as well as by batch id: a batch id somebody else guessed returns
- * nothing rather than their work.
- */
 export async function findJobsByBatchForUser(batchId: string, userId: string): Promise<JobRow[]> {
   const { rows } = await pool.query<JobRow>(
     `SELECT * FROM jobs
@@ -54,12 +42,50 @@ export async function findJobsByBatchForUser(batchId: string, userId: string): P
   return rows;
 }
 
-/**
- * The live job for this image and these options.
- *
- * This is how the loser of an insert race learns what it lost to. The ordering only
- * breaks a tie - the unique index guarantees there is at most one.
- */
+export type JobBatch = {
+  batchId: string;
+  userId: string;
+};
+
+export async function findJobBatch(jobId: string): Promise<JobBatch | null> {
+  const { rows } = await pool.query<{ batch_id: string | null; user_id: string }>(
+    'SELECT batch_id, user_id FROM jobs WHERE id = $1',
+    [jobId],
+  );
+
+  const row = rows[0];
+
+  if (row === undefined || row.batch_id === null) {
+    return null;
+  }
+
+  return { batchId: row.batch_id, userId: row.user_id };
+}
+
+export async function countOutstandingInBatch(
+  batchId: string,
+  maxAttempts: number,
+): Promise<number> {
+  const { rows } = await pool.query<{ count: number }>(
+    `SELECT count(*)::int AS count FROM jobs
+      WHERE batch_id = $1
+        AND (status IN ('pending', 'processing') OR (status = 'failed' AND attempts < $2))`,
+    [batchId, maxAttempts],
+  );
+
+  return rows[0]?.count ?? 0;
+}
+
+// The first worker to stamp the batch sends the email; a second one updates nothing.
+export async function claimBatchAnnouncement(batchId: string): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    'UPDATE jobs SET notified_at = now() WHERE batch_id = $1 AND notified_at IS NULL',
+    [batchId],
+  );
+
+  return rowCount !== null && rowCount > 0;
+}
+
 export async function findLiveJob(imageId: string, optionsHash: string): Promise<JobRow | null> {
   const { rows } = await pool.query<JobRow>(
     `SELECT * FROM jobs
@@ -101,20 +127,10 @@ export type JobResult = {
   height: number;
 };
 
-// How long a claim is trusted. Past this the previous holder is assumed to have died
-// and the job may be taken again. Must be comfortably longer than
-// SQS_VISIBILITY_TIMEOUT, or a busy worker would have its job taken out from under it.
+// Longer than the queue visibility timeout, so a live worker is never robbed of its job.
 const STALE_CLAIM_SECONDS = 600;
 
-/**
- * Takes the job for this consumer, and reports whether the attempt was won.
- *
- * The queue delivers a message at least once, so two consumers can be handed the same
- * job. This condition is what makes the take exclusive: a job can be taken when it is
- * new, when an earlier attempt failed, or when the existing claim has gone stale. Any
- * other case means somebody else owns it, and the caller must leave the message alone
- * rather than process the same image a second time.
- */
+// Only the consumer that wins this update runs the job.
 export async function markJobProcessing(id: string): Promise<boolean> {
   const { rowCount } = await pool.query(
     `UPDATE jobs
@@ -131,6 +147,7 @@ export async function markJobProcessing(id: string): Promise<boolean> {
 }
 
 export async function markJobReady(id: string, result: JobResult): Promise<void> {
+  // The job row and the image row move together, or the list shows a stale result.
   const client = await pool.connect();
 
   try {

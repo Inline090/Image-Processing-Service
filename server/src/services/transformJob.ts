@@ -5,13 +5,9 @@ import type { TransformJobMessage } from '../queue/sqs.js';
 import { findImageByIdForUser } from '../repositories/images.js';
 import { markJobFailed, markJobProcessing, markJobReady } from '../repositories/jobs.js';
 import { getObject, putObject } from '../storage/s3.js';
+import { announceBatchIfSettled } from './announceBatch.js';
 
-/**
- * What gets stored on the job, and therefore shown in the UI. Only errors this
- * code raises itself are passed through: anything else - a storage failure, an SDK
- * error - can name buckets, keys and regions, so the caller gets plain words and
- * the full detail stays in the log.
- */
+// Only errors this code raises are shown; everything else stays in the log.
 export function failureMessage(err: unknown): string {
   if (err instanceof ImageTooLargeError) {
     return err.message;
@@ -20,21 +16,9 @@ export function failureMessage(err: unknown): string {
   return 'This image could not be processed. Please try a different file.';
 }
 
-/**
- * What one attempt produced. `skipped` means the job was not this consumer's to run:
- * another worker holds it, it has already finished, or its claim went stale and was
- * taken over. Nothing failed, and the message should still leave the queue - the job
- * has been dealt with, just not by here.
- */
 export type ProcessOutcome = 'processed' | 'skipped';
 
-/**
- * Runs one transform end to end: read the original, process it, and store the result.
- *
- * It throws on failure rather than deciding what that means, because the two things
- * that consume the queue retry differently - the poll loop in worker.ts on a
- * long-lived host, and the queue's own redrive policy when the worker runs on Lambda.
- */
+// Runs one job end to end: read the original, transform it, store it, then announce.
 export async function processJob(message: TransformJobMessage): Promise<ProcessOutcome> {
   const claimed = await markJobProcessing(message.jobId);
 
@@ -75,13 +59,12 @@ export async function processJob(message: TransformJobMessage): Promise<ProcessO
     'job output stored',
   );
 
+  await announceBatchIfSettled(message.jobId);
+
   return 'processed';
 }
 
-/**
- * Records a failure against the job so the UI can stop waiting on it. The message is
- * always a plain sentence, never the raw error - see failureMessage.
- */
 export async function failJob(jobId: string, err: unknown): Promise<void> {
   await markJobFailed(jobId, failureMessage(err));
+  await announceBatchIfSettled(jobId);
 }
