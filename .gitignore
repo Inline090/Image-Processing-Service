@@ -11,4 +11,5 @@ uploads/
 
 !.env.example
 
-# Husky test hook
+policy.json
+trust.json

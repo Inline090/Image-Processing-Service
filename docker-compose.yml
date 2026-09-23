@@ -1,14 +1,3 @@
-# The infrastructure this project talks to, for running locally without an AWS account.
-#
-# The application is deliberately not in here. It runs on the host, where `tsx watch`
-# gives it a reload, and reaches these over localhost. In a deployment the same code
-# talks to S3 and SQS instead, and the only thing that changes is whether S3_ENDPOINT
-# and SQS_ENDPOINT are set.
-#
-# These three also exist on this machine as standalone containers, `ips-postgres`,
-# `ips-minio` and `ips-sqs`. They use the same ports, so run one set or the other, not
-# both - and `docker start ips-postgres ips-minio ips-sqs` is the shorter route when
-# they are already there.
 name: image-processing-service
 
 services:
@@ -40,8 +29,6 @@ services:
     volumes:
       - minio-data:/data
 
-  # MinIO starts with nothing in it and the application never creates a bucket, so one
-  # is made here. It retries until MinIO is listening and then exits.
   minio-init:
     image: quay.io/minio/mc
     depends_on:
@@ -52,8 +39,6 @@ services:
       mc mb --ignore-existing local/image-processing-originals;
       "
 
-  # SQS. Both queues, the transformations queue and its dead-letter queue, are created
-  # by the application on first use, so this needs no setup beyond the port.
   elasticmq:
     image: softwaremill/elasticmq-native:latest
     ports:

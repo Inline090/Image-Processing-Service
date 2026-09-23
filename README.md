@@ -24,21 +24,27 @@ Uploads are validated and stored immediately; the transformation itself runs on 
 **Prerequisites:** Node 20+, npm, Docker (local dev only — an AWS account is only needed for deployment).
 
 ```bash
-git clone https://github.com/Inline090/Image-Processing-Service.git
-cd "Image Processing Service"
+git clone https://github.com/Inline090/Lumina.git
+cd Lumina
 npm install
 docker compose up -d          # Postgres, MinIO (S3), ElasticMQ (SQS)
 cp server/.env.example server/.env
 ```
 
-Set `JWT_SECRET`, then uncomment the four local-stack variables so the app talks to Docker instead of AWS:
+The file is `server/.env`. It is gitignored, and it is the only file you have to fill in. Open it and paste this block in, keeping the settings already there:
 
-```
+```bash
+# server/.env
+JWT_SECRET=dev-only-secret-change-me
+
+# the containers from docker-compose.yml. Remove these four lines to talk to real AWS.
 AWS_ACCESS_KEY_ID=minioadmin
 AWS_SECRET_ACCESS_KEY=minioadmin
 S3_ENDPOINT=http://localhost:9000
 SQS_ENDPOINT=http://localhost:9324
 ```
+
+That is a complete local setup. `JWT_SECRET` is the only value the app refuses to boot without, and every other setting in `server/.env.example` already has a working default. On a host there is no `.env` file: the same names go into the host's environment variables, without `S3_ENDPOINT` and `SQS_ENDPOINT`.
 
 ```bash
 npm run migrate --workspace=server
@@ -51,15 +57,15 @@ The worker isn't optional — without it, jobs sit at `pending` indefinitely.
 
 **Env vars worth knowing:**
 
-| Var | Purpose |
-|---|---|
-| `MAX_INPUT_PIXELS` | Decoded upload size cap (default 50MP) |
-| `GUEST_UPLOAD_LIMIT` | Uploads per guest account (default 5) |
-| `HISTORY_LIMIT` | Images per user before uploads 403 (default 20) |
-| `RESEND_API_KEY` / `EMAIL_FROM` | Completion emails — optional, silently skipped if unset |
-| `SQS_VISIBILITY_TIMEOUT` | Must exceed your slowest job, or a message can be double-picked-up |
-| `CORS_ORIGINS` | Allowed browser origins, comma-separated |
-| `TRUST_PROXY` | Proxy count in front of the API — set to 1 behind a load balancer |
+| Var                             | Purpose                                                            |
+| ------------------------------- | ------------------------------------------------------------------ |
+| `MAX_INPUT_PIXELS`              | Decoded upload size cap (default 50MP)                             |
+| `GUEST_UPLOAD_LIMIT`            | Uploads per guest account (default 5)                              |
+| `HISTORY_LIMIT`                 | Images per user before uploads 403 (default 20)                    |
+| `RESEND_API_KEY` / `EMAIL_FROM` | Completion emails — optional, silently skipped if unset            |
+| `SQS_VISIBILITY_TIMEOUT`        | Must exceed your slowest job, or a message can be double-picked-up |
+| `CORS_ORIGINS`                  | Allowed browser origins, comma-separated                           |
+| `TRUST_PROXY`                   | Proxy count in front of the API — set to 1 behind a load balancer  |
 
 **Service URLs:** client `:5173` · API `:3000` · Postgres `:5432` (`image_processing`, `ips`/`ips`) · MinIO `:9000` (console `:9001`, `minioadmin`/`minioadmin`) · ElasticMQ `:9324`
 
@@ -114,23 +120,23 @@ client/
 
 Success responses are `{ resource: ... }`; errors are `{ error: { message } }`.
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/api/health` | Liveness check |
-| POST | `/api/auth/guest` | Creates a throwaway account, returns a token |
-| GET | `/api/auth/me` | Current user |
-| GET | `/api/auth/:provider` | Starts sign-in: `google`, `facebook`, `twitter` |
-| GET | `/api/auth/:provider/callback` | Provider callback, redirects to client |
-| POST | `/api/images` | Multipart, field `image`, 10 MB max |
-| GET | `/api/images` | `?page=1&limit=20`, own images, newest first |
-| GET | `/api/images/:id` | 404 for someone else's image |
-| GET | `/api/images/:id/download` | `?variant=original\|processed`, pre-signed URL |
-| DELETE | `/api/images/:id` | Deletes one image and its stored objects |
-| DELETE | `/api/images` | Deletes every image you own |
-| POST | `/api/images/:id/transform` | `202` with a job, or `200` if cached |
-| POST | `/api/images/transform-bulk` | One options set applied to up to 10 images |
-| GET | `/api/jobs/:id` | Job status, for polling |
-| GET | `/api/jobs/batch/:id` | Per-image status for one bulk request |
+| Method | Endpoint                       | Description                                     |
+| ------ | ------------------------------ | ----------------------------------------------- |
+| GET    | `/api/health`                  | Liveness check                                  |
+| POST   | `/api/auth/guest`              | Creates a throwaway account, returns a token    |
+| GET    | `/api/auth/me`                 | Current user                                    |
+| GET    | `/api/auth/:provider`          | Starts sign-in: `google`, `facebook`, `twitter` |
+| GET    | `/api/auth/:provider/callback` | Provider callback, redirects to client          |
+| POST   | `/api/images`                  | Multipart, field `image`, 10 MB max             |
+| GET    | `/api/images`                  | `?page=1&limit=20`, own images, newest first    |
+| GET    | `/api/images/:id`              | 404 for someone else's image                    |
+| GET    | `/api/images/:id/download`     | `?variant=original\|processed`, pre-signed URL  |
+| DELETE | `/api/images/:id`              | Deletes one image and its stored objects        |
+| DELETE | `/api/images`                  | Deletes every image you own                     |
+| POST   | `/api/images/:id/transform`    | `202` with a job, or `200` if cached            |
+| POST   | `/api/images/transform-bulk`   | One options set applied to up to 10 images      |
+| GET    | `/api/jobs/:id`                | Job status, for polling                         |
+| GET    | `/api/jobs/batch/:id`          | Per-image status for one bulk request           |
 
 **Bulk transform** applies one set of options to up to 10 images in a single call. Each image gets its own job and message, so retries and dead-lettering stay isolated per image rather than redoing an entire batch. Ownership is checked for the whole list at once — one image you don't own 404s the whole request. The list is de-duplicated before the cap applies, and the rate limit matches the single-image route (30 images/window, i.e. 3 batches).
 
@@ -153,12 +159,14 @@ Success responses are `{ resource: ... }`; errors are `{ error: { message } }`.
 **2. Queues** — create `transformations` and `transformations-dlq` yourself, or let the app create them on first use. The app sets the redrive policy (max receive 3) on every start.
 
 **3. Permissions**
+
 - S3: `PutObject`, `GetObject`, `DeleteObject`
 - SQS: `SendMessage`, `ReceiveMessage`, `DeleteMessage`, `GetQueueUrl`, `GetQueueAttributes`, `SetQueueAttributes` (+ `CreateQueue` only if the queues don't already exist)
 
 **4. Region & credentials** — `AWS_REGION` must match the bucket's region, or S3 fails with a redirect error that never names the region. Use the standard credential chain (instance role, profile, or env vars) rather than hardcoding keys in `.env` where avoidable.
 
 **Notes:**
+
 - A bad AWS setting won't stop the API from booting — it surfaces later as a generic 500, so check server logs on first run.
 - The worker validates its queue at startup and fails there with a clear message.
 - Off-EC2, set `AWS_EC2_METADATA_DISABLED=true` to skip a slow metadata-endpoint lookup — don't set this if you're relying on an instance role.
@@ -171,7 +179,7 @@ Three independent pieces: managed Postgres, an always-on service each for API an
 - **Database** — Neon/Supabase both hand you a `DATABASE_URL` with `sslmode=require`; leave it as-is (Postgres reads it as encrypt-without-verify — the driver's own connection-string parser would read it stricter and fail with an unrelated-looking error). Use `sslmode=verify-full` if you want certificate checking. Run migrations once before first deploy.
 - **API** — `npm run build --workspace=server`, `npm start --workspace=server`. Reads `PORT` from the host, health check at `/api/health`. Needs `DATABASE_URL`, `JWT_SECRET`, `NODE_ENV=production`, `AWS_REGION`, `S3_BUCKET`, AWS credentials. Set `TRUST_PROXY=1` behind a load balancer.
 - **Worker** — same build, `npm run start:worker --workspace=server`. Opens no port; run as a background worker, not a web service. Can also run as Lambda via `Dockerfile.lambda` (handler: `server/dist/lambda/workerHandler.js`), in which case SQS's own redrive policy handles retries instead.
-- **Client** — `npm run build --workspace=client` → `client/dist`, deploy as static. Set `VITE_API_URL` *before* building (it's baked into the bundle). Add its origin to `CORS_ORIGINS`. Rewrite all paths to `index.html` for client-side routing.
+- **Client** — `npm run build --workspace=client` → `client/dist`, deploy as static. Set `VITE_API_URL` _before_ building (it's baked into the bundle). Add its origin to `CORS_ORIGINS`. Rewrite all paths to `index.html` for client-side routing.
 
 Set `NODE_ENV=production` on both services.
 
@@ -182,6 +190,7 @@ No email/password signup — only provider sign-in or a guest session.
 **Guest** — `POST /api/auth/guest` returns a token immediately, capped at 5 uploads. The cap is tracked both on the account and via an HttpOnly cookie; clearing cookies resets the cookie-side counter but not the account's, so the real ceiling is the guest-creation rate limit × the upload cap.
 
 **OAuth** — each provider (Google, Facebook, Twitter) is optional; set its client ID/secret pair or its route will say it isn't configured rather than attempting a broken redirect. Register each app's callback as `<OAUTH_CALLBACK_BASE>/<provider>/callback`:
+
 - Google — [console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials)
 - Facebook — [developers.facebook.com/apps](https://developers.facebook.com/apps)
 - Twitter — [developer.x.com/en/portal/dashboard](https://developer.x.com/en/portal/dashboard)
