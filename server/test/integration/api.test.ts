@@ -341,113 +341,73 @@ describe('deleting', () => {
   });
 });
 
-describe('guest sessions', () => {
-  let token = '';
-  let guestId = '';
-  let uploadLimit = 0;
-
-  before(async () => {
-    const response = await fetch(`${baseUrl}/api/auth/guest`, { method: 'POST' });
-    const body = (await response.json()) as {
-      token: string;
-      user: { id: string; guest: boolean; uploadLimit: number | null };
-    };
-
-    assert.equal(response.status, 201);
-
-    token = body.token;
-    guestId = body.user.id;
-    uploadLimit = body.user.uploadLimit ?? 0;
-  });
-
-  after(async () => {
-    await pool.query('DELETE FROM users WHERE id = $1', [guestId]);
-  });
-
-  it('is issued with a cap attached', () => {
-    assert.equal(uploadLimit, 5);
-  });
-
-  it('reports itself as a guest on /me', async () => {
-    const response = await fetch(`${baseUrl}/api/auth/me`, authed(token));
-    const body = (await response.json()) as {
-      user: { guest: boolean; uploadLimit: number | null; uploadsUsed: number };
-    };
+describe('email link sign in', () => {
+  async function startFor(email: string): Promise<{ sent: boolean; signInUrl?: string }> {
+    const response = await fetch(`${baseUrl}/api/auth/email/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
 
     assert.equal(response.status, 200);
-    assert.equal(body.user.guest, true);
-    assert.equal(body.user.uploadLimit, 5);
-    assert.equal(body.user.uploadsUsed, 0);
+
+    return (await response.json()) as { sent: boolean; signInUrl?: string };
+  }
+
+  // The link is absolute, built from the API's public base, so point it at the test server.
+  function follow(url: string): Promise<Response> {
+    const link = new URL(url);
+
+    return fetch(`${baseUrl}${link.pathname}${link.search}`, { redirect: 'manual' });
+  }
+
+  it('returns a link for an address that cannot receive mail', async () => {
+    const body = await startFor(`link-${runId}-a@test.local`);
+
+    assert.equal(body.sent, true);
+    assert.ok(body.signInUrl?.includes('/api/auth/email/verify?token='), 'expected a sign in url');
   });
 
-  it('starts with an empty history of its own', async () => {
-    const response = await fetch(`${baseUrl}/api/images`, authed(token));
-    const body = (await response.json()) as { total: number };
+  it('starts a session when the link is followed', async () => {
+    const email = `link-${runId}-b@test.local`;
+    const body = await startFor(email);
+    const response = await follow(body.signInUrl ?? '');
+    const location = response.headers.get('location') ?? '';
+    const marker = '#token=';
 
-    assert.equal(body.total, 0);
+    assert.equal(response.status, 302);
+    assert.ok(location.includes(marker), `expected a token fragment, got ${location}`);
+
+    const token = decodeURIComponent(location.slice(location.indexOf(marker) + marker.length));
+    const me = await fetch(`${baseUrl}/api/auth/me`, authed(token));
+
+    assert.equal(me.status, 200);
+
+    const user = (await me.json()) as { user: { email: string } };
+
+    assert.equal(user.user.email, email);
   });
 
-  function uploadAttempt(): Promise<Response> {
-    const png = Buffer.from([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
-      0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
-      0x15, 0xc4, 0x89,
-    ]);
+  it('refuses the same link a second time', async () => {
+    const body = await startFor(`link-${runId}-c@test.local`);
+    const url = body.signInUrl ?? '';
 
-    const form = new FormData();
-    form.append('image', new Blob([png], { type: 'image/png' }), 'over.png');
+    await follow(url);
 
-    return fetch(`${baseUrl}/api/images`, {
+    const again = await follow(url);
+
+    assert.equal(again.status, 302);
+    assert.ok((again.headers.get('location') ?? '').includes('#error='));
+  });
+
+  it('rejects an address that is not an address', async () => {
+    const response = await fetch(`${baseUrl}/api/auth/email/start`, {
       method: 'POST',
-      ...authed(token),
-      body: form,
-    });
-  }
-
-  async function spendAllowance(count: number): Promise<void> {
-    await pool.query('UPDATE users SET guest_upload_count = $2 WHERE id = $1', [guestId, count]);
-  }
-
-  it('refuses an upload once the allowance is spent, without storing anything', async () => {
-    await spendAllowance(uploadLimit);
-
-    const response = await uploadAttempt();
-
-    assert.equal(response.status, 403);
-
-    const { rows } = await pool.query<{ count: number }>(
-      'SELECT count(*)::int AS count FROM images WHERE user_id = $1',
-      [guestId],
-    );
-
-    assert.equal(rows[0]?.count, 0);
-  });
-
-  it('does not refund an upload when the history is deleted', async () => {
-    await seedImages(guestId, 3);
-
-    const cleared = await fetch(`${baseUrl}/api/images`, {
-      method: 'DELETE',
-      ...authed(token),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'not-an-address' }),
     });
 
-    assert.equal(cleared.status, 200);
-
-    const relisted = await fetch(`${baseUrl}/api/images`, authed(token));
-    const after = (await relisted.json()) as { total: number };
-
-    assert.equal(after.total, 0);
-
-    const response = await uploadAttempt();
-
-    assert.equal(response.status, 403);
-  });
-
-  it('reports the spent allowance on /me', async () => {
-    const response = await fetch(`${baseUrl}/api/auth/me`, authed(token));
-    const body = (await response.json()) as { user: { uploadsUsed: number } };
-
-    assert.equal(body.user.uploadsUsed, uploadLimit);
+    assert.equal(response.status, 400);
   });
 });
 

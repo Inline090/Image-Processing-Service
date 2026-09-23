@@ -40,12 +40,12 @@ after(async () => {
   await pool.end();
 });
 
-async function seedPasswordAccount(email: string): Promise<string> {
+async function seedAccount(email: string): Promise<string> {
   createdEmails.add(email);
 
   const { rows } = await pool.query<{ id: string }>(
-    'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id',
-    [email, 'not-a-real-hash'],
+    'INSERT INTO users (email) VALUES ($1) RETURNING id',
+    [email],
   );
 
   return rows[0]?.id ?? '';
@@ -95,9 +95,9 @@ describe('sign-in routes', () => {
 });
 
 describe('linking a provider account', () => {
-  it('joins an account by its address, so a password account keeps its history', async () => {
+  it('joins an account by its address, so an existing account keeps its history', async () => {
     const email = `oauth-join-${runId}@example.com`;
-    const existingId = await seedPasswordAccount(email);
+    const existingId = await seedAccount(email);
 
     const signedIn = await resolveOAuthUser({
       provider: 'google',
@@ -144,7 +144,7 @@ describe('linking a provider account', () => {
     assert.equal(viaGoogle.id, viaFacebook.id);
   });
 
-  it('makes an account with no password at all', async () => {
+  it('creates the account under the address the provider gave', async () => {
     const email = `oauth-nopass-${runId}@example.com`;
     createdEmails.add(email);
 
@@ -154,7 +154,7 @@ describe('linking a provider account', () => {
       email,
     });
 
-    assert.equal(user.password_hash, null);
+    assert.equal(user.email, email);
   });
 
   it('invents an address for a provider that hands over none', () => {
