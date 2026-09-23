@@ -72,6 +72,7 @@ export const config = {
   maxInputPixels: readInt('MAX_INPUT_PIXELS', 50_000_000, 1),
   loginTokenMinutes: readInt('LOGIN_TOKEN_MINUTES', 15, 1),
   historyLimit: readInt('HISTORY_LIMIT', 20, 1),
+  cacheTtlDays: readInt('CACHE_TTL_DAYS', 7, 1),
   corsOrigins: optional('CORS_ORIGINS', '')
     .split(',')
     .map((origin) => origin.trim())

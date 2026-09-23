@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { ImageTooLargeError, transformImage } from '../processing/transform.js';
 import type { TransformJobMessage } from '../queue/sqs.js';
@@ -39,13 +40,17 @@ export async function processJob(message: TransformJobMessage): Promise<ProcessO
   const mimeType = `image/${result.format}`;
   await putObject(processedKey, result.buffer, mimeType);
 
-  await markJobReady(message.jobId, {
-    processedKey,
-    format: result.format,
-    mimeType,
-    width: result.width,
-    height: result.height,
-  });
+  await markJobReady(
+    message.jobId,
+    {
+      processedKey,
+      format: result.format,
+      mimeType,
+      width: result.width,
+      height: result.height,
+    },
+    config.cacheTtlDays,
+  );
 
   logger.info(
     {

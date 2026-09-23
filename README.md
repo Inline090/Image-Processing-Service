@@ -11,7 +11,7 @@ Uploads are validated and stored immediately; the transformation itself runs on 
 - JWT auth via Google, Facebook, Twitter, or an emailed sign in link
 - Multipart uploads up to 10 MB, stored in a private S3 bucket
 - Async transform pipeline (resize, crop, rotate, trim, pad, mirror, modulate, blur, sharpen, grayscale, sepia, watermark, format conversion) via Sharp
-- Result caching keyed on the picture's content digest and options
+- Result caching keyed on the picture's content digest and options, with a 7 day time to live
 - Retries with a dead-letter queue after 3 failed attempts
 - Email notification when a batch finishes
 - Pre-signed URLs for all access; downloads keep the original filename
@@ -62,6 +62,7 @@ The worker isn't optional — without it, jobs sit at `pending` indefinitely.
 | `MAX_INPUT_PIXELS`              | Decoded upload size cap (default 50MP)                             |
 | `LOGIN_TOKEN_MINUTES`           | Minutes an emailed sign in link stays valid (default 15)           |
 | `HISTORY_LIMIT`                 | Images per user before uploads 403 (default 20)                    |
+| `CACHE_TTL_DAYS`                | How long a finished transform stays reusable (default 7)           |
 | `RESEND_API_KEY` / `EMAIL_FROM` | Completion emails — optional, silently skipped if unset            |
 | `SQS_VISIBILITY_TIMEOUT`        | Must exceed your slowest job, or a message can be double-picked-up |
 | `CORS_ORIGINS`                  | Allowed browser origins, comma-separated                           |
