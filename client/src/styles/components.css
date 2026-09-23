@@ -122,10 +122,11 @@
   text-align: center;
 }
 
-.auth-guest {
+.auth-email {
   display: flex;
-  justify-content: center;
-  margin-top: var(--space-5);
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
 }
 
 .auth-providers {
@@ -139,11 +140,6 @@
   width: 1rem;
   height: 1rem;
   fill: currentColor;
-}
-
-.account-hint {
-  font-size: var(--text-label);
-  color: var(--muted-foreground);
 }
 
 form {

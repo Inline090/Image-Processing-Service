@@ -5,8 +5,6 @@ import {
   ApiError,
   getMe,
   hasToken,
-  isGuestExhausted,
-  markGuestExhausted,
   setToken,
   setUnauthorizedHandler,
   type Account,
@@ -28,7 +26,6 @@ export default function App() {
   const [run, setRun] = useState<TransformRun | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
   const [historyRefresh, setHistoryRefresh] = useState(0);
-  const [guestExhausted, setGuestExhausted] = useState(isGuestExhausted());
   const navigate = useNavigate();
 
   // A single transform shows the job card, a batch shows the carousel, never both.
@@ -81,11 +78,6 @@ export default function App() {
 
   const applyAccount = useCallback((me: Account): void => {
     setAccount(me);
-
-    if (me.guest && me.uploadLimit !== null && me.uploadsUsed >= me.uploadLimit) {
-      markGuestExhausted();
-      setGuestExhausted(true);
-    }
   }, []);
 
   const refreshAccount = useCallback(async (): Promise<void> => {
@@ -115,12 +107,6 @@ export default function App() {
     setAccount(null);
   }
 
-  function leaveGuestMode(): void {
-    signOut();
-  }
-
-  const isGuest = account !== null && account.guest;
-
   const brand = (
     <div className="brand">
       <span className="wordmark">Lumina</span>
@@ -136,13 +122,7 @@ export default function App() {
           <div className="auth-card">
             {expired && <p className="notice">Your session expired. Please sign in again.</p>}
 
-            <AuthPanel
-              guestExhausted={guestExhausted}
-              onSignedIn={() => {
-                setSignedIn(true);
-                setExpired(false);
-              }}
-            />
+            <AuthPanel />
           </div>
         </div>
       </main>
@@ -163,25 +143,9 @@ export default function App() {
             <HistoryIcon size={16} strokeWidth={1.5} />
           </Link>
 
-          {isGuest && account.uploadLimit !== null && (
-            <span className="account-hint">
-              Guest: {account.uploadsUsed} of {account.uploadLimit} uploads used
-            </span>
-          )}
-
-          {isGuest ? (
-            <Button
-              variant="ghost"
-              onClick={leaveGuestMode}
-              title="Leave the guest session and sign in with an account."
-            >
-              Sign in
-            </Button>
-          ) : (
-            <Button variant="ghost" onClick={signOut} title="Sign out of this account.">
-              Sign out
-            </Button>
-          )}
+          <Button variant="ghost" onClick={signOut} title="Sign out of this account.">
+            Sign out
+          </Button>
 
           {account !== null && account.avatarUrl !== null && (
             <img
@@ -202,8 +166,6 @@ export default function App() {
               <UploadPanel
                 onJobQueued={handleJobQueued}
                 onRunQueued={handleRunQueued}
-                emailable={account !== null && account.emailable}
-                uploadLimit={account === null ? null : account.uploadLimit}
                 onUploaded={() => {
                   void refreshAccount();
                   setHistoryRefresh((current) => current + 1);

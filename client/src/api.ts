@@ -99,16 +99,6 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   unauthorizedHandler = handler;
 }
 
-const GUEST_EXHAUSTED_KEY = 'ips.guestExhausted';
-
-export function isGuestExhausted(): boolean {
-  return localStorage.getItem(GUEST_EXHAUSTED_KEY) !== null;
-}
-
-export function markGuestExhausted(): void {
-  localStorage.setItem(GUEST_EXHAUSTED_KEY, '1');
-}
-
 let authRedirectMessage: string | null = null;
 
 // Reads the token or the error out of the fragment and wipes it from the address bar.
@@ -196,14 +186,14 @@ function unhelpfulStatus(status: number): string {
 
 export const MAX_BATCH_IMAGES = 10;
 
-export async function uploadImages(files: File[]): Promise<{ images: Image[]; dropped: number }> {
+export async function uploadImages(files: File[]): Promise<{ images: Image[] }> {
   const body = new FormData();
 
   for (const file of files) {
     body.append('images', file);
   }
 
-  return request<{ images: Image[]; dropped: number }>('/images/batch', { method: 'POST', body });
+  return request<{ images: Image[] }>('/images/batch', { method: 'POST', body });
 }
 
 export async function transformImage(id: string, options: TransformOptions): Promise<Job> {
@@ -303,15 +293,7 @@ export type Account = {
   id: string;
   email: string;
   createdAt: string;
-
   avatarUrl: string | null;
-  guest: boolean;
-
-  uploadLimit: number | null;
-
-  uploadsUsed: number;
-
-  emailable: boolean;
 };
 
 export async function getMe(): Promise<Account> {
@@ -319,11 +301,16 @@ export async function getMe(): Promise<Account> {
   return result.user;
 }
 
-export async function signInAsGuest(): Promise<Account> {
-  const result = await request<{ token: string; user: Account }>('/auth/guest', {
-    method: 'POST',
-  });
+export type EmailSignIn = {
+  sent: boolean;
+  signInUrl?: string;
+};
 
-  setToken(result.token);
-  return result.user;
+// The link arrives by email; the server only echoes it when it could not send one.
+export function startEmailSignIn(email: string): Promise<EmailSignIn> {
+  return request<EmailSignIn>('/auth/email/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
 }

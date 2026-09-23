@@ -62,9 +62,6 @@ type Props = {
 
   onRunQueued: (run: TransformRun) => void;
 
-  emailable: boolean;
-
-  uploadLimit: number | null;
 
   onUploaded: () => void;
 };
@@ -150,8 +147,7 @@ const DEFAULTS = {
 export function UploadPanel({
   onJobQueued,
   onRunQueued,
-  emailable,
-  uploadLimit,
+
   onUploaded,
 }: Props) {
   const [files, setFiles] = useState<File[]>([]);
@@ -597,7 +593,7 @@ export function UploadPanel({
     try {
       setProgress(`Uploading ${files.length} ${files.length === 1 ? 'image' : 'images'}`);
 
-      const { images, dropped } = await uploadImages(files);
+      const { images } = await uploadImages(files);
 
       const accepted = images.flatMap((image, index) => {
         const picked = files[index];
@@ -615,7 +611,7 @@ export function UploadPanel({
 
       const single = accepted[0];
 
-      if (dropped === 0 && accepted.length === 1 && single !== undefined) {
+      if (accepted.length === 1 && single !== undefined) {
         const queued = await transformImage(single.id, buildOptions(imageSize));
 
         onJobQueued(queued.id);
@@ -647,16 +643,9 @@ export function UploadPanel({
             (result.alreadyDone > 0 ? `, ${result.alreadyDone} already done` : ''),
         );
 
-        setEmailNotice(dropped === 0 && result.queued > 0);
+        setEmailNotice(result.queued > 0);
       }
 
-      if (dropped > 0) {
-        setError(
-          `Uploaded ${images.length} of ${files.length}.` +
-            (uploadLimit === null ? '' : ` A guest account can upload ${uploadLimit} in total.`) +
-            ' Sign in to upload more.',
-        );
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
@@ -1175,9 +1164,7 @@ export function UploadPanel({
 
           {emailNotice && (
             <p className="notice notice--info">
-              {emailable
-                ? "Upload complete. Your images are being processed. You can close this tab; we'll email you when they're ready."
-                : 'Upload complete. Your images are being processed. You can close this tab. Sign in with Google or Facebook to be notified by email.'}
+              Upload complete. Your images are being processed. You can close this tab; we'll email you when they're ready.
             </p>
           )}
 
