@@ -20,16 +20,12 @@ import {
 } from '../repositories/images.js';
 import { createJob, findLiveJob, findReadyJob } from '../repositories/jobs.js';
 import { multerFiles } from '../middleware/upload.js';
-import { refundGuestUploads } from '../repositories/guestUsage.js';
-import { findUserById, recordGuestUpload } from '../repositories/users.js';
 import type { BulkTransformInput } from '../schemas/bulk.schema.js';
 import { downloadQuerySchema, listImagesQuerySchema } from '../schemas/image.schema.js';
 import type { TransformInput } from '../schemas/transform.schema.js';
-import { claimGuestUploads, guestUploadsLeft } from '../services/guestAllowance.js';
 import { contentDigest } from '../storage/digest.js';
 import { downloadFilename } from '../storage/filename.js';
 import { deleteObject, putObject, signedDownloadUrl, signedUrl } from '../storage/s3.js';
-import { guestKey } from '../middleware/guestSession.js';
 
 async function serializeImage(image: ImageRow) {
   return {
@@ -66,49 +62,25 @@ export async function uploadImage(req: Request, res: Response): Promise<void> {
     throw new AppError('No file uploaded. Expected a form field named "image".', 400);
   }
 
-  const user = await findUserById(authUser.sub);
-  if (user === null) {
-    throw new AppError('User no longer exists', 404);
-  }
-
-  const usageKey = guestKey(req);
   const room = config.historyLimit - (await countHistoryForUser(authUser.sub));
 
   if (room < 1) {
     throw new AppError('Your history is full. Delete an image to make room.', 403);
   }
 
-  const claimed = await claimGuestUploads(user, usageKey, 1);
+  const key = `originals/${authUser.sub}/${randomUUID()}`;
+  await putObject(key, file.buffer, file.mimetype);
 
-  if (claimed === 0) {
-    throw new AppError(
-      `Guest accounts can upload ${config.guestUploadLimit} images in total. Sign in to upload more.`,
-      403,
-    );
-  }
+  const image = await createImage({
+    userId: authUser.sub,
+    originalKey: key,
+    mimeType: file.mimetype,
+    sizeBytes: file.size,
+    originalFilename: file.originalname,
+    contentHash: contentDigest(file.buffer),
+  });
 
-  try {
-    const key = `originals/${authUser.sub}/${randomUUID()}`;
-    await putObject(key, file.buffer, file.mimetype);
-
-    const image = await createImage({
-      userId: authUser.sub,
-      originalKey: key,
-      mimeType: file.mimetype,
-      sizeBytes: file.size,
-      originalFilename: file.originalname,
-      contentHash: contentDigest(file.buffer),
-    });
-
-    if (user.is_guest) {
-      await recordGuestUpload(authUser.sub);
-    }
-
-    res.status(201).json({ image: await serializeImage(image) });
-  } catch (err) {
-    await refundGuestUploads(usageKey, claimed);
-    throw err;
-  }
+  res.status(201).json({ image: await serializeImage(image) });
 }
 
 export async function uploadImages(req: Request, res: Response): Promise<void> {
@@ -122,11 +94,6 @@ export async function uploadImages(req: Request, res: Response): Promise<void> {
     throw new AppError('No files uploaded. Expected a form field named "images".', 400);
   }
 
-  const user = await findUserById(authUser.sub);
-  if (user === null) {
-    throw new AppError('User no longer exists', 404);
-  }
-
   const room = config.historyLimit - (await countHistoryForUser(authUser.sub));
 
   if (files.length > room) {
@@ -138,58 +105,25 @@ export async function uploadImages(req: Request, res: Response): Promise<void> {
     );
   }
 
-  const usageKey = guestKey(req);
-  const left = await guestUploadsLeft(user, usageKey);
-
-  const claimed = await claimGuestUploads(
-    user,
-    usageKey,
-    user.is_guest ? Math.min(files.length, left) : files.length,
-  );
-  const accepted = files.slice(0, claimed);
-  const dropped = files.length - accepted.length;
-
-  if (accepted.length === 0) {
-    throw new AppError(
-      `Guest accounts can upload ${config.guestUploadLimit} images in total. Sign in to upload more.`,
-      403,
-    );
-  }
-
   const created: ImageRow[] = [];
 
-  try {
-    for (const file of accepted) {
-      const key = `originals/${authUser.sub}/${randomUUID()}`;
-      await putObject(key, file.buffer, file.mimetype);
+  for (const file of files) {
+    const key = `originals/${authUser.sub}/${randomUUID()}`;
+    await putObject(key, file.buffer, file.mimetype);
 
-      const image = await createImage({
+    created.push(
+      await createImage({
         userId: authUser.sub,
         originalKey: key,
         mimeType: file.mimetype,
         sizeBytes: file.size,
         originalFilename: file.originalname,
         contentHash: contentDigest(file.buffer),
-      });
-
-      created.push(image);
-    }
-  } catch (err) {
-    await refundGuestUploads(usageKey, claimed);
-    throw err;
+      }),
+    );
   }
 
-  if (user.is_guest) {
-    await Promise.all([
-      recordGuestUpload(authUser.sub, created.length),
-      refundGuestUploads(usageKey, claimed - created.length),
-    ]);
-  }
-
-  res.status(201).json({
-    images: await Promise.all(created.map(serializeImage)),
-    dropped,
-  });
+  res.status(201).json({ images: await Promise.all(created.map(serializeImage)) });
 }
 
 function serializeJob(job: JobRow) {

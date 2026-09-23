@@ -5,12 +5,7 @@ export type JobStatus = 'pending' | 'processing' | 'ready' | 'failed';
 export type UserRow = {
   id: string;
   email: string;
-
-  password_hash: string | null;
-
   avatar_url: string | null;
-  is_guest: boolean;
-  guest_upload_count: number;
   created_at: Date;
 };
 

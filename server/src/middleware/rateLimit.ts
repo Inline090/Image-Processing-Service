@@ -25,16 +25,6 @@ export const transformRateLimit = rateLimit({
   },
 });
 
-export const guestRateLimit = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 10,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
-  handler: (_req, _res, next) => {
-    next(new AppError('Too many guest sessions, please try again later', 429));
-  },
-});
-
 export const bulkTransformRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: Math.max(1, Math.floor(TRANSFORM_IMAGE_BUDGET / MAX_BULK_IMAGES)),

@@ -3,7 +3,6 @@ import passport from 'passport';
 import { configurePassport } from './auth/passport.js';
 import { config } from './config.js';
 import { cors } from './middleware/cors.js';
-import { guestSession } from './middleware/guestSession.js';
 import { errorHandler, notFound } from './middleware/error.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { authRouter } from './routes/auth.routes.js';
@@ -19,13 +18,10 @@ if (config.trustProxy !== undefined) {
   app.set('trust proxy', config.trustProxy);
 }
 
-// Order matters: logging, CORS, JSON, the guest token, then Passport.
+// Order matters: logging, CORS, JSON, then Passport.
 app.use(requestLogger);
 app.use(cors);
 app.use(express.json());
-
-// Gives every visitor a browser token, so a guest cap can be counted against it.
-app.use(guestSession);
 
 app.use(passport.initialize());
 
