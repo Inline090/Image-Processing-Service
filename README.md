@@ -8,7 +8,7 @@ Uploads are validated and stored immediately; the transformation itself runs on 
 
 ## Features
 
-- JWT auth via Google, Facebook, Twitter, or a guest session
+- JWT auth via Google, Facebook, Twitter, or an emailed sign in link
 - Multipart uploads up to 10 MB, stored in a private S3 bucket
 - Async transform pipeline (resize, crop, rotate, trim, pad, mirror, modulate, blur, sharpen, grayscale, sepia, watermark, format conversion) via Sharp
 - Result caching keyed on the picture's content digest and options
@@ -16,7 +16,7 @@ Uploads are validated and stored immediately; the transformation itself runs on 
 - Email notification when a batch finishes
 - Pre-signed URLs for all access; downloads keep the original filename
 - Deleting an image removes its DB row, jobs, and its S3 objects, keeping any result another upload still shares
-- Guest accounts capped at 5 uploads; registered accounts uncapped
+- Sign-in links are single use, expire in 15 minutes, and are stored only as a digest
 - All reads/writes scoped to the requesting user
 
 ## Quick Start
@@ -60,7 +60,7 @@ The worker isn't optional — without it, jobs sit at `pending` indefinitely.
 | Var                             | Purpose                                                            |
 | ------------------------------- | ------------------------------------------------------------------ |
 | `MAX_INPUT_PIXELS`              | Decoded upload size cap (default 50MP)                             |
-| `GUEST_UPLOAD_LIMIT`            | Uploads per guest account (default 5)                              |
+| `LOGIN_TOKEN_MINUTES`           | Minutes an emailed sign in link stays valid (default 15)           |
 | `HISTORY_LIMIT`                 | Images per user before uploads 403 (default 20)                    |
 | `RESEND_API_KEY` / `EMAIL_FROM` | Completion emails — optional, silently skipped if unset            |
 | `SQS_VISIBILITY_TIMEOUT`        | Must exceed your slowest job, or a message can be double-picked-up |
@@ -110,7 +110,7 @@ client/
 
 ## Database Schema
 
-- **users** — id, email, password_hash (unused — sign-in is provider-based or guest), is_guest, guest_upload_count, created_at
+- **users** — id, email, avatar_url, created_at
 - **oauth_accounts** — id, user_id, provider, provider_id, created_at (one row per linked provider)
 - **images** — id, user_id, original_key, processed_key, mime_type, processed_mime_type, original_filename, size_bytes, width, height, status, created_at
 - **jobs** — id, image_id, user_id, options, options_hash, status, attempts, error, processed_key, width, height, format, notified_at, created_at, updated_at
@@ -123,7 +123,8 @@ Success responses are `{ resource: ... }`; errors are `{ error: { message } }`.
 | Method | Endpoint                       | Description                                     |
 | ------ | ------------------------------ | ----------------------------------------------- |
 | GET    | `/api/health`                  | Liveness check                                  |
-| POST   | `/api/auth/guest`              | Creates a throwaway account, returns a token    |
+| POST   | `/api/auth/email/start`        | Emails a single use sign in link                |
+| GET    | `/api/auth/email/verify`       | Redeems the link and hands the client a token   |
 | GET    | `/api/auth/me`                 | Current user                                    |
 | GET    | `/api/auth/:provider`          | Starts sign-in: `google`, `facebook`, `twitter` |
 | GET    | `/api/auth/:provider/callback` | Provider callback, redirects to client          |
@@ -185,9 +186,9 @@ Set `NODE_ENV=production` on both services.
 
 ## Signing In
 
-No email/password signup — only provider sign-in or a guest session.
+No passwords at all: provider sign-in, or an emailed sign in link.
 
-**Guest** — `POST /api/auth/guest` returns a token immediately, capped at 5 uploads. The cap is tracked both on the account and via an HttpOnly cookie; clearing cookies resets the cookie-side counter but not the account's, so the real ceiling is the guest-creation rate limit × the upload cap.
+**Email link** — `POST /api/auth/email/start` emails a link carrying a random token, stores only its SHA-256 digest, and redeems it with a single UPDATE, so a link works once and expires in 15 minutes. Following it creates the account on first use and redirects to the client with a token in the fragment, the same shape the provider callbacks already use.
 
 **OAuth** — each provider (Google, Facebook, Twitter) is optional; set its client ID/secret pair or its route will say it isn't configured rather than attempting a broken redirect. Register each app's callback as `<OAUTH_CALLBACK_BASE>/<provider>/callback`:
 

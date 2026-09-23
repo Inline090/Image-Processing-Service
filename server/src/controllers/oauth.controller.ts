@@ -2,18 +2,10 @@ import type { NextFunction, Request, Response } from 'express';
 import passport from 'passport';
 import { isProviderEnabled, type OAuthProvider } from '../auth/providers.js';
 import { createState } from '../auth/state.js';
-import { config } from '../config.js';
 import type { UserRow } from '../db/types.js';
 import { logger } from '../logger.js';
+import { clientRedirect, signInFailed } from '../services/clientRedirect.js';
 import { signToken } from '../utils/jwt.js';
-
-function clientRedirect(fragment: string): string {
-  return `${config.clientUrl}/#${fragment}`;
-}
-
-function signInFailed(message: string): string {
-  return clientRedirect(`error=${encodeURIComponent(message)}`);
-}
 
 export function startProvider(provider: OAuthProvider) {
   return (req: Request, res: Response, next: NextFunction): void => {

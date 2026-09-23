@@ -1,12 +1,14 @@
 import { Router } from 'express';
-import { guest, me } from '../controllers/auth.controller.js';
+import { me, startEmailSignIn, verifyEmailSignIn } from '../controllers/auth.controller.js';
 import { finishProvider, startProvider } from '../controllers/oauth.controller.js';
 import { requireAuth } from '../middleware/auth.js';
-import { authRateLimit, guestRateLimit } from '../middleware/rateLimit.js';
+import { authRateLimit } from '../middleware/rateLimit.js';
 
 export const authRouter = Router();
 
-authRouter.post('/guest', guestRateLimit, guest);
+authRouter.post('/email/start', authRateLimit, startEmailSignIn);
+authRouter.get('/email/verify', authRateLimit, verifyEmailSignIn);
+
 authRouter.get('/me', requireAuth, me);
 
 authRouter.get('/google', authRateLimit, startProvider('google'));
