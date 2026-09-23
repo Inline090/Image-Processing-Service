@@ -4,6 +4,7 @@ import { after, before, describe, it } from 'node:test';
 import app from '../../src/app.js';
 import { config, MAX_BULK_IMAGES } from '../../src/config.js';
 import { pool } from '../../src/db/pool.js';
+import { hashTransformOptions } from '../../src/processing/optionsHash.js';
 import { signToken } from '../../src/utils/jwt.js';
 
 process.env.AWS_ACCESS_KEY_ID ??= 'test-placeholder';
@@ -655,5 +656,56 @@ describe('bulk transform', () => {
     );
 
     assert.equal(response.status, 400);
+  });
+});
+
+describe('cache reuse across uploads', () => {
+  it('serves the stored result when the same picture is uploaded again', async () => {
+    const email = `test-reuse-${runId}@example.com`;
+    const token = await tokenFor(email);
+    const userId = await findUserId(email);
+    const digest = 'e'.repeat(64);
+    const options = { width: 320, format: 'webp' as const };
+    const optionsHash = hashTransformOptions(digest, options);
+
+    const insertImage = async (name: string): Promise<string> => {
+      const { rows } = await pool.query<{ id: string }>(
+        `INSERT INTO images (user_id, original_key, mime_type, size_bytes, content_hash)
+         VALUES ($1, $2, 'image/png', 1000, $3) RETURNING id`,
+        [userId, `test/${userId}/${name}`, digest],
+      );
+
+      return rows[0]?.id ?? '';
+    };
+
+    const firstUpload = await insertImage('first');
+    const secondUpload = await insertImage('second');
+
+    const { rows: seeded } = await pool.query<{ id: string }>(
+      `INSERT INTO jobs (image_id, user_id, options, options_hash, status, processed_key, format, width, height)
+       VALUES ($1, $2, $3, $4, 'ready', 'processed/shared/one', 'webp', 320, 240)
+       RETURNING id`,
+      [firstUpload, userId, JSON.stringify(options), optionsHash],
+    );
+
+    const response = await fetch(`${baseUrl}/api/images/${secondUpload}/transform`, {
+      method: 'POST',
+      headers: { ...authed(token).headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(options),
+    });
+
+    assert.equal(response.status, 200);
+
+    const body = (await response.json()) as { cached: boolean; job: { id: string } };
+
+    assert.equal(body.cached, true);
+    assert.equal(body.job.id, seeded[0]?.id);
+
+    const { rows: linked } = await pool.query<{ processed_key: string | null }>(
+      'SELECT processed_key FROM images WHERE id = $1',
+      [secondUpload],
+    );
+
+    assert.equal(linked[0]?.processed_key, 'processed/shared/one');
   });
 });
