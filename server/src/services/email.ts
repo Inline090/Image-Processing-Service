@@ -54,6 +54,19 @@ export function batchEmail(counts: BatchCounts, historyUrl: string): EmailConten
   return { subject: SUBJECT, html };
 }
 
+// Sent on request only, so it says what to do and what to do if it was not you.
+export function loginEmail(signInUrl: string, minutes: number): EmailContent {
+  const html = [
+    '<p>Hello,</p>',
+    `<p>Click the link below to sign in to Lumina. It works once and expires in ${minutes} minutes.</p>`,
+    `<p><a href="${signInUrl}">Sign in to Lumina</a></p>`,
+    '<p>If you did not ask to sign in, you can ignore this email.</p>',
+    '<p>Thank you,<br />The Lumina Team</p>',
+  ].join('');
+
+  return { subject: 'Sign in to Lumina', html };
+}
+
 type Email = {
   to: string;
   subject: string;

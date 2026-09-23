@@ -70,7 +70,7 @@ export const config = {
   sqsEndpoint: optionalUrl('SQS_ENDPOINT'),
   sqsVisibilityTimeout: readInt('SQS_VISIBILITY_TIMEOUT', 300, 1),
   maxInputPixels: readInt('MAX_INPUT_PIXELS', 50_000_000, 1),
-  guestUploadLimit: readInt('GUEST_UPLOAD_LIMIT', 5, 1),
+  loginTokenMinutes: readInt('LOGIN_TOKEN_MINUTES', 15, 1),
   historyLimit: readInt('HISTORY_LIMIT', 20, 1),
   corsOrigins: optional('CORS_ORIGINS', '')
     .split(',')
