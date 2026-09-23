@@ -10,7 +10,8 @@ export type NewJob = {
   batchId?: string | null;
 };
 
-// The partial unique index rejects a second live job for the same image and options.
+// The partial unique index rejects a second live job for the same user and options, so one
+// picture uploaded twice with the same transform shares a single job.
 export async function createJob({
   imageId,
   userId,
@@ -21,7 +22,7 @@ export async function createJob({
   const { rows } = await pool.query<JobRow>(
     `INSERT INTO jobs (image_id, user_id, options, options_hash, batch_id)
      VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (image_id, options_hash)
+     ON CONFLICT (user_id, options_hash)
        WHERE status IN ('pending', 'processing', 'ready')
        DO NOTHING
      RETURNING *`,
@@ -86,25 +87,25 @@ export async function claimBatchAnnouncement(batchId: string): Promise<boolean> 
   return rowCount !== null && rowCount > 0;
 }
 
-export async function findLiveJob(imageId: string, optionsHash: string): Promise<JobRow | null> {
+export async function findLiveJob(userId: string, optionsHash: string): Promise<JobRow | null> {
   const { rows } = await pool.query<JobRow>(
     `SELECT * FROM jobs
-     WHERE image_id = $1 AND options_hash = $2 AND status IN ('pending', 'processing', 'ready')
+     WHERE user_id = $1 AND options_hash = $2 AND status IN ('pending', 'processing', 'ready')
      ORDER BY created_at DESC
      LIMIT 1`,
-    [imageId, optionsHash],
+    [userId, optionsHash],
   );
 
   return rows[0] ?? null;
 }
 
-export async function findReadyJob(imageId: string, optionsHash: string): Promise<JobRow | null> {
+export async function findReadyJob(userId: string, optionsHash: string): Promise<JobRow | null> {
   const { rows } = await pool.query<JobRow>(
     `SELECT * FROM jobs
-     WHERE image_id = $1 AND options_hash = $2 AND status = 'ready'
+     WHERE user_id = $1 AND options_hash = $2 AND status = 'ready'
      ORDER BY created_at DESC
      LIMIT 1`,
-    [imageId, optionsHash],
+    [userId, optionsHash],
   );
 
   return rows[0] ?? null;

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { TransformInput } from '../schemas/transform.schema.js';
 
-const PIPELINE_VERSION = 3;
+const PIPELINE_VERSION = 4;
 
 export const DEFAULT_FIT = 'cover';
 export const DEFAULT_FOCUS = 'center';
@@ -93,8 +93,10 @@ function canonicalize(options: TransformInput): string {
   ]);
 }
 
-// The version prefix stops a changed pipeline from serving old entries.
-export function hashTransformOptions(imageId: string, options: TransformInput): string {
-  const material = `${PIPELINE_VERSION}:${imageId}:${canonicalize(options)}`;
+// The version prefix stops a changed pipeline from serving old entries. The key is the digest
+// of the stored bytes when there is one, so the same picture uploaded twice shares an entry;
+// rows that predate the digest fall back to their id.
+export function hashTransformOptions(imageKey: string, options: TransformInput): string {
+  const material = `${PIPELINE_VERSION}:${imageKey}:${canonicalize(options)}`;
   return createHash('sha256').update(material).digest('hex');
 }

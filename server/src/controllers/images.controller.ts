@@ -14,6 +14,8 @@ import {
   deleteImageForUser,
   findImageByIdForUser,
   findImagesByIdsForUser,
+  isResultShared,
+  linkImageToResult,
   listImagesForUser,
 } from '../repositories/images.js';
 import { createJob, findLiveJob, findReadyJob } from '../repositories/jobs.js';
@@ -24,6 +26,7 @@ import type { BulkTransformInput } from '../schemas/bulk.schema.js';
 import { downloadQuerySchema, listImagesQuerySchema } from '../schemas/image.schema.js';
 import type { TransformInput } from '../schemas/transform.schema.js';
 import { claimGuestUploads, guestUploadsLeft } from '../services/guestAllowance.js';
+import { contentDigest } from '../storage/digest.js';
 import { downloadFilename } from '../storage/filename.js';
 import { deleteObject, putObject, signedDownloadUrl, signedUrl } from '../storage/s3.js';
 import { guestKey } from '../middleware/guestSession.js';
@@ -38,6 +41,18 @@ async function serializeImage(image: ImageRow) {
     originalUrl: await signedUrl(image.original_key),
     processedUrl: image.processed_key === null ? null : await signedUrl(image.processed_key),
   };
+}
+
+// A cached job may have been stored for an earlier upload of the same picture, so the image
+// asking for it is pointed at the object that already exists.
+async function attachCachedResult(image: ImageRow, job: JobRow): Promise<void> {
+  if (job.processed_key === null || image.processed_key === job.processed_key) {
+    return;
+  }
+
+  const mimeType = job.format === null ? image.mime_type : `image/${job.format}`;
+
+  await linkImageToResult(image.id, job.processed_key, mimeType);
 }
 
 export async function uploadImage(req: Request, res: Response): Promise<void> {
@@ -82,6 +97,7 @@ export async function uploadImage(req: Request, res: Response): Promise<void> {
       mimeType: file.mimetype,
       sizeBytes: file.size,
       originalFilename: file.originalname,
+      contentHash: contentDigest(file.buffer),
     });
 
     if (user.is_guest) {
@@ -153,6 +169,7 @@ export async function uploadImages(req: Request, res: Response): Promise<void> {
         mimeType: file.mimetype,
         sizeBytes: file.size,
         originalFilename: file.originalname,
+        contentHash: contentDigest(file.buffer),
       });
 
       created.push(image);
@@ -207,10 +224,12 @@ export async function transform(req: Request, res: Response): Promise<void> {
   }
 
   const options = req.body as TransformInput;
-  const optionsHash = hashTransformOptions(image.id, options);
-  const existing = await findReadyJob(image.id, optionsHash);
+  const optionsHash = hashTransformOptions(image.content_hash ?? image.id, options);
+  const existing = await findReadyJob(authUser.sub, optionsHash);
 
   if (existing !== null) {
+    await attachCachedResult(image, existing);
+
     res.json({
       job: {
         ...serializeJob(existing),
@@ -230,7 +249,7 @@ export async function transform(req: Request, res: Response): Promise<void> {
   });
 
   if (created === null) {
-    const inFlight = await findLiveJob(image.id, optionsHash);
+    const inFlight = await findLiveJob(authUser.sub, optionsHash);
 
     if (inFlight === null) {
       throw new AppError('Could not queue the transform', 500);
@@ -279,10 +298,11 @@ export async function transformBulk(req: Request, res: Response): Promise<void> 
   let alreadyDone = 0;
 
   for (const image of owned) {
-    const optionsHash = hashTransformOptions(image.id, options);
-    const ready = await findReadyJob(image.id, optionsHash);
+    const optionsHash = hashTransformOptions(image.content_hash ?? image.id, options);
+    const ready = await findReadyJob(authUser.sub, optionsHash);
 
     if (ready !== null) {
+      await attachCachedResult(image, ready);
       alreadyDone += 1;
       continue;
     }
@@ -402,9 +422,22 @@ export async function downloadImage(req: Request, res: Response): Promise<void> 
 }
 
 async function discardObjects(images: ImageRow[]): Promise<void> {
-  const keys = images.flatMap((image) =>
-    image.processed_key === null ? [image.original_key] : [image.original_key, image.processed_key],
-  );
+  const keys: string[] = [];
+
+  for (const image of images) {
+    keys.push(image.original_key);
+
+    if (image.processed_key === null) {
+      continue;
+    }
+
+    // One picture uploaded twice shares a result, so the object may still be in use.
+    if (await isResultShared(image.processed_key, image.id)) {
+      continue;
+    }
+
+    keys.push(image.processed_key);
+  }
 
   await Promise.all(
     keys.map((key) =>

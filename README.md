@@ -4,18 +4,18 @@ A Node.js/Express/TypeScript service for uploading and transforming images. Shar
 
 ## Overview
 
-Uploads are validated and stored immediately; the transformation itself runs on a separate worker instead of the request thread, so a 40-megapixel resize doesn't block the API. Jobs are keyed on image + transform options, so repeating the same request returns the cached result instead of reprocessing. Failed jobs retry automatically and land in a dead-letter queue after three attempts.
+Uploads are validated and stored immediately; the transformation itself runs on a separate worker instead of the request thread, so a 40-megapixel resize doesn't block the API. Jobs are keyed on a SHA-256 digest of the picture and the transform options, so the same image uploaded again with the same transform reuses the stored result instead of reprocessing. Failed jobs retry automatically and land in a dead-letter queue after three attempts.
 
 ## Features
 
 - JWT auth via Google, Facebook, Twitter, or a guest session
 - Multipart uploads up to 10 MB, stored in a private S3 bucket
 - Async transform pipeline (resize, crop, rotate, trim, pad, mirror, modulate, blur, sharpen, grayscale, sepia, watermark, format conversion) via Sharp
-- Result caching keyed on image + options
+- Result caching keyed on the picture's content digest and options
 - Retries with a dead-letter queue after 3 failed attempts
 - Email notification when a batch finishes
 - Pre-signed URLs for all access; downloads keep the original filename
-- Deleting an image removes its DB row, jobs, and both S3 objects — single or bulk
+- Deleting an image removes its DB row, jobs, and its S3 objects, keeping any result another upload still shares
 - Guest accounts capped at 5 uploads; registered accounts uncapped
 - All reads/writes scoped to the requesting user
 
