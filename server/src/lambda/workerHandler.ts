@@ -1,11 +1,14 @@
 import type { SQSBatchResponse, SQSEvent } from 'aws-lambda';
 import { logger } from '../logger.js';
 import type { TransformJobMessage } from '../queue/sqs.js';
+import { pruneCacheIfDue } from '../services/housekeeping.js';
 import { failJob, processJob } from '../services/transformJob.js';
 
 // Reports failures so the queue retries them; anything unlisted is deleted.
 export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
   const batchItemFailures: SQSBatchResponse['batchItemFailures'] = [];
+
+  await pruneCacheIfDue();
 
   for (const record of event.Records) {
     const startedAt = Date.now();

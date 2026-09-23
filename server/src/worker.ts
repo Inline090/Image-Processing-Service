@@ -1,6 +1,7 @@
 import { pool } from './db/pool.js';
 import { logger } from './logger.js';
 import { deleteJob, ensureQueue, MAX_RECEIVE_COUNT, receiveJob } from './queue/sqs.js';
+import { pruneCacheIfDue } from './services/housekeeping.js';
 import { failJob, processJob } from './services/transformJob.js';
 
 const POLL_ERROR_BACKOFF_MS = 5000;
@@ -22,6 +23,8 @@ async function pollOnce(): Promise<void> {
 
   const { job, receiptHandle } = received;
   const startedAt = Date.now();
+
+  await pruneCacheIfDue();
 
   logger.info(
     { jobId: job.jobId, imageId: job.imageId, receiveCount: received.receiveCount },
