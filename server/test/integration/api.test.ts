@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import { after, before, describe, it } from 'node:test';
 import app from '../../src/app.js';
 import { config, MAX_BULK_IMAGES } from '../../src/config.js';
 import { pool } from '../../src/db/pool.js';
 import { hashTransformOptions } from '../../src/processing/optionsHash.js';
+import { pruneExpiredCache } from '../../src/repositories/jobs.js';
 import { signToken } from '../../src/utils/jwt.js';
 
 process.env.AWS_ACCESS_KEY_ID ??= 'test-placeholder';
@@ -338,6 +340,77 @@ describe('deleting', () => {
 
     assert.equal(response.status, 200);
     assert.equal(body.deleted, 0);
+  });
+});
+
+describe('cache expiry', () => {
+  const options = { width: 320, format: 'webp' as const };
+
+  async function expiredEntry(): Promise<{ email: string; imageId: string; jobId: string }> {
+    const email = `ttl-${runId}@example.com`;
+    const userId = await findUserId(email);
+    // A fresh key per call, so one test's live job does not block the next test's insert.
+    const digest = randomUUID().replace(/-/g, '');
+    const optionsHash = hashTransformOptions(digest, options);
+
+    const { rows: images } = await pool.query<{ id: string }>(
+      `INSERT INTO images (user_id, original_key, mime_type, size_bytes, content_hash)
+       VALUES ($1, $2, 'image/png', 1000, $3) RETURNING id`,
+      [userId, `test/${userId}/ttl-${Math.random()}`, digest],
+    );
+
+    const imageId = images[0]?.id ?? '';
+
+    const { rows: jobs } = await pool.query<{ id: string }>(
+      `INSERT INTO jobs (image_id, user_id, options, options_hash, status, processed_key, format,
+                         width, height, cache_until)
+       VALUES ($1, $2, $3, $4, 'ready', 'processed/expired/one', 'webp', 320, 240,
+               now() - interval '1 day')
+       RETURNING id`,
+      [imageId, userId, JSON.stringify(options), optionsHash],
+    );
+
+    return { email, imageId, jobId: jobs[0]?.id ?? '' };
+  }
+
+  before(async () => {
+    await tokenFor(`ttl-${runId}@example.com`);
+  });
+
+  it('does not serve an entry past its time to live', async () => {
+    const entry = await expiredEntry();
+    const token = await tokenFor(entry.email);
+
+    const response = await fetch(`${baseUrl}/api/images/${entry.imageId}/transform`, {
+      method: 'POST',
+      headers: { ...authed(token).headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(options),
+    });
+
+    const body = (await response.json()) as { cached: boolean; job: { id: string } };
+
+    assert.equal(response.status, 202);
+    assert.equal(body.cached, false);
+    assert.notEqual(body.job.id, entry.jobId);
+  });
+
+  it('deletes the expired rows when the worker prunes', async () => {
+    const entry = await expiredEntry();
+
+    const removed = await pruneExpiredCache();
+
+    assert.ok(removed >= 1, 'expected the expired entry to be removed');
+
+    const { rows } = await pool.query('SELECT 1 FROM jobs WHERE id = $1', [entry.jobId]);
+
+    assert.equal(rows.length, 0);
+
+    const { rows: images } = await pool.query<{ processed_key: string | null }>(
+      'SELECT processed_key FROM images WHERE id = $1',
+      [entry.imageId],
+    );
+
+    assert.equal(images[0]?.processed_key, null);
   });
 });
 
