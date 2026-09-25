@@ -122,6 +122,15 @@
   text-align: center;
 }
 
+.live-preview {
+  margin-bottom: var(--space-5);
+}
+
+.live-preview img {
+  display: block;
+  max-width: 100%;
+}
+
 .auth-email {
   display: flex;
   flex-direction: column;

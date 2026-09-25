@@ -16,6 +16,7 @@ import {
   type TransformOptions,
 } from '../api';
 import type { TransformRun } from '../run';
+import { LivePreview } from './LivePreview';
 import { Button } from './ui/Button';
 import { Field } from './ui/Field';
 import { Panel } from './ui/Panel';
@@ -698,6 +699,14 @@ export function UploadPanel({
 
             <span className="field-hint">PNG, JPEG, WebP or GIF, up to 10 MB</span>
           </div>
+
+          {previews.length === 1 && previews[0] !== undefined && (
+            <LivePreview
+              src={previews[0].url}
+              options={buildOptions(imageSize)}
+              size={imageSize}
+            />
+          )}
 
           {previews.length > 0 && (
             <ul className="picked-grid">
